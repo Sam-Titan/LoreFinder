@@ -39,5 +39,5 @@ async def summarize_chapters(chapters: list[dict]) -> list[dict]:
         )
         results.extend(batch_results)
         if i + batch_size < len(chapters):
-            await asyncio.sleep(2)
+            await asyncio.sleep(20)
     return results
