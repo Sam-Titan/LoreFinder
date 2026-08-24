@@ -18,7 +18,7 @@ async def _summarize_one(chapter: dict) -> dict:
     try:
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-2.0-flash-lite",
+            model=settings.GEMINI_MODEL_NAME,
             contents=prompt
         )
         chapter["summary"] = response.text.strip()
