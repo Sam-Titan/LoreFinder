@@ -1,11 +1,11 @@
 from fastapi import APIRouter, HTTPException
-from app.schemas.query_schema import System_Query_Response
+from app.schemas.query_schema import System_Query_Response, UserQuery
 from app.services.query_service import run_query_pipeline
 
 router = APIRouter()
 
 @router.post("/", response_model=System_Query_Response)
-async def query(payload: System_Query_Response):
+async def query(payload: UserQuery):
     try:
         result = await run_query_pipeline(payload.doc_id, payload.query)
         return System_Query_Response(
