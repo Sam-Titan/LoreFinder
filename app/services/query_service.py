@@ -10,7 +10,7 @@ from app.db import firestore
 os.environ["GROQ_API_KEY"] = settings.GROQ_API_KEY
 
 _llm = ChatGroq(
-    model="meta-llama/llama-4-scout-17b-16e-instruct",
+    model=settings.GROQ_MODEL_NAME,
     temperature=0,
     max_tokens=10,
     timeout=30,
@@ -48,7 +48,7 @@ def _assemble_context(results: list[dict]) -> str:
 
 def _generate_answer(query: str, context: str) -> str:
     llm = ChatGroq(
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        model=settings.GROQ_MODEL_NAME,
         temperature=0.2,
         max_tokens=1000,
         timeout=30,

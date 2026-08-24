@@ -76,7 +76,7 @@ def fetch_novel(title: str, author: str) -> tuple[str, str]:
     tools = [search_gutenberg, search_standard_ebooks, search_archive_org]
 
     llm = ChatGroq(
-        model="meta-llama/llama-4-scout-17b-16e-instruct",
+        model=settings.GROQ_MODEL_NAME,
         temperature=0,
         api_key=settings.GROQ_API_KEY
     )
