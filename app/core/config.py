@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     # Embedding
     EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
 
+    # Groq Model
+    GROQ_MODEL_NAME: str = "openai/gpt-oss-20b"
     # Celery + Redis
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     REDIS_URL: str = "redis://localhost:6379/1"
