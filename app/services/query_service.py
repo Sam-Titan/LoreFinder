@@ -72,6 +72,8 @@ def _generate_answer(query: str, context: str) -> str:
             raise
 
 async def run_query_pipeline(doc_id: str, query: str) -> dict:
+    query = query.replace("\u2019", "'").replace("\u2018", "'").strip()
+
     # Parallel: classify + embed
     loop = asyncio.get_event_loop()
     category, query_vector = await asyncio.gather(
