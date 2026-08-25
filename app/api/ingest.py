@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.schemas.ingest_schema import IngestNovelRequest, IngestStatusResponse
 from app.services.ingest_service import check_duplicate
@@ -10,15 +10,36 @@ router = APIRouter()
 
 @router.post("/novel", response_model=IngestStatusResponse)
 async def ingest_novel(payload: IngestNovelRequest):
-    # 1. Dedup check
     existing_doc_id = await check_duplicate(payload.novel_name, payload.author_name)
     if existing_doc_id:
+        doc = firestore.get_document(existing_doc_id)
+        status = doc.get("status")
+
+        # Recovery: if stuck in processing > 10 min, restart
+        if status == "processing":
+            ingested_at = doc.get("ingested_at")
+            if ingested_at:
+                elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(ingested_at)
+                if elapsed > timedelta(minutes=10):
+                    firestore.update_status(existing_doc_id, "pending")
+                    ingest_novel_task.delay(existing_doc_id, payload.novel_name, payload.author_name)
+                    return IngestStatusResponse(
+                        doc_id=existing_doc_id,
+                        status="pending",
+                        message="Previous ingestion timed out. Restarted."
+                    )
+            return IngestStatusResponse(
+                doc_id=existing_doc_id,
+                status="processing",
+                message="Novel is currently being ingested."
+            )
+
         return IngestStatusResponse(
             doc_id=existing_doc_id,
-            status="ready",
-            message="Novel already exists in the system."
+            status=status,
+            message="Novel already exists. Use this doc_id to query."
         )
-
+    
     # 2. Create Firestore document with pending status
     doc_id = f"doc_{uuid.uuid4().hex[:10]}"
     firestore.create_document(doc_id, {
