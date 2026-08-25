@@ -1,6 +1,7 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
 from app.core.config import settings
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 _db = None
 
@@ -30,8 +31,8 @@ def check_exists(title: str, author: str) -> str | None:
     db = get_client()
     docs = (
         db.collection("documents")
-        .where("title", "==", title)
-        .where("author", "==", author)
+        .where(filter=FieldFilter("title", "==", title))
+        .where(filter=FieldFilter("author", "==", author))
         .limit(1)
         .stream()
     )
@@ -79,7 +80,7 @@ def get_chunks_by_indexes(doc_id: str, chunk_indexes: list[int]) -> list[dict]:
         db.collection("documents")
         .document(doc_id)
         .collection("chunks")
-        .where("chunk_index", "in", chunk_indexes)
+        .where(filter=FieldFilter("chunk_index", "in", chunk_indexes))
         .stream()
     )
     return [doc.to_dict() for doc in docs]
