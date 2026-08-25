@@ -62,7 +62,7 @@ def _generate_answer(query: str, context: str) -> str:
     Answer:"""
     for attempt in range(3):
         try:
-            llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0.2, max_tokens=1000, timeout=30)
+            llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0.2, max_tokens=2048, timeout=60)
             response = llm.invoke(prompt)
             return response.content
         except Exception as e:
