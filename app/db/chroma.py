@@ -28,6 +28,7 @@ def write_chunk_embeddings(doc_id: str, chunks: list[dict], vectors: list[list[f
         metadatas=[{
             "doc_id": doc_id,
             "chapter_number": c["chapter_number"],
+            "chapter_title": c.get("chapter_title") or "",  # add this
             "chunk_index": c["chunk_index"]
         } for c in chunks]
     )
