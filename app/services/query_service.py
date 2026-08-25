@@ -6,6 +6,7 @@ from app.schemas.query_schema import Category
 from app.services.embedder import get_embedder
 from app.services import retriever
 from app.db import firestore
+import time
 
 os.environ["GROQ_API_KEY"] = settings.GROQ_API_KEY
 
@@ -49,24 +50,26 @@ def _assemble_context(results: list[dict]) -> str:
     return "\n\n".join(parts)
 
 def _generate_answer(query: str, context: str) -> str:
-    llm = ChatGroq(
-        model=settings.GROQ_MODEL_NAME,
-        temperature=0.2,
-        max_tokens=1000,
-        timeout=30,
-    )
     prompt = f"""You are a literary assistant. Answer the user's question using only the provided context.
-Always cite the chapter number and chunk index when referencing content.
-If the answer is not in the context, say so clearly.
-
-Context:
-{context}
-
-Question: {query}
-
-Answer:"""
-    response = llm.invoke(prompt)
-    return response.content
+    Always cite the chapter number and chunk index when referencing content.
+    If the answer is not in the context, say so clearly.
+    
+    Context:
+    {context}
+    
+    Question: {query}
+    
+    Answer:"""
+    for attempt in range(3):
+        try:
+            llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0.2, max_tokens=1000, timeout=30)
+            response = llm.invoke(prompt)
+            return response.content
+        except Exception as e:
+            if "rate" in str(e).lower() and attempt < 2:
+                time.sleep(2 ** attempt * 5)
+                continue
+            raise
 
 async def run_query_pipeline(doc_id: str, query: str) -> dict:
     # Parallel: classify + embed

@@ -5,6 +5,23 @@ from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from app.core.config import settings
+import time
+
+def _safe_get(url: str, timeout: int = 20, retries: int = 3) -> requests.Response:
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, timeout=timeout)
+            if response.status_code == 429:
+                wait = 2 ** attempt * 5  # exponential backoff: 5, 10, 20s
+                print(f"Rate limited. Waiting {wait}s...")
+                time.sleep(wait)
+                continue
+            return response
+        except requests.Timeout:
+            if attempt == retries - 1:
+                raise
+            time.sleep(2)
+    raise RuntimeError(f"Failed after {retries} retries: {url}")
 
 # --- Tools (URL discovery only) ---
 
@@ -13,7 +30,7 @@ from app.core.config import settings
 def search_gutenberg(query: str) -> str:
     """Search Project Gutenberg for a novel. Returns a plain text download URL if found."""
     url = f"https://gutendex.com/books/?search={query}"
-    response = requests.get(url, timeout=20)
+    response = _safe_get(url)
     data = response.json()
     if not data["results"]:
         return "Not found on Project Gutenberg."
@@ -31,7 +48,7 @@ def search_gutenberg(query: str) -> str:
 def search_standard_ebooks(query: str) -> str:
     """Search Standard Ebooks for a novel. Returns a page URL if found."""
     url = f"https://standardebooks.org/ebooks?query={query}"
-    response = requests.get(url, timeout=20)
+    response = _safe_get(url)
     soup = BeautifulSoup(response.text, "html.parser")
     result = soup.find("article", class_="ebook")
     if not result:
@@ -48,7 +65,7 @@ def search_archive_org(query: str) -> str:
         f"https://archive.org/advancedsearch.php"
         f"?q={query}&fl[]=identifier&rows=1&output=json&mediatype=texts"
     )
-    response = requests.get(url, timeout=20)
+    response = _safe_get(url)
     data = response.json()
     docs = data.get("response", {}).get("docs", [])
     if not docs:
