@@ -54,7 +54,7 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
                 "chapter_title": ch["chapter_title"],
                 "summary": ch["summary"],
                 "chunk_indexes": [
-                    c["chunk_index"] for c in chunks
+                    c["chunk_id"] for c in chunks  # store chunk_ids, not chunk_index
                     if c["chapter_number"] == ch["chapter_number"]
                 ],
                 "status": "complete",
