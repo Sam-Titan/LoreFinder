@@ -45,9 +45,9 @@ def detect_chapters(text: str) -> list[dict]:
     # If no chapters detected, treat whole text as one chapter
     if not chapters:
         chapters.append({
-            "chapter_number": 1,
-            "chapter_title": "Full Text",
-            "text": text
+            "chapter_number": i + 1,
+            "chapter_title": match.group(0).strip().split("\n")[0][:60],  # cap at 60 chars
+            "text": text[start:end].strip()
         })
 
     return chapters
