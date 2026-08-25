@@ -2,6 +2,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from app.core.config import settings
 from google.cloud.firestore_v1.base_query import FieldFilter
+from thefuzz import fuzz
 
 _db = None
 
@@ -29,15 +30,13 @@ def update_status(doc_id: str, status: str):
 
 def check_exists(title: str, author: str) -> str | None:
     db = get_client()
-    docs = (
-        db.collection("documents")
-        .where(filter=FieldFilter("title", "==", title))
-        .where(filter=FieldFilter("author", "==", author))
-        .limit(1)
-        .stream()
-    )
+    docs = db.collection("documents").stream()
     for doc in docs:
-        return doc.id
+        data = doc.to_dict()
+        title_score = fuzz.ratio(title.lower(), data.get("title", "").lower())
+        author_score = fuzz.ratio(author.lower(), data.get("author", "").lower())
+        if title_score >= 85 and author_score >= 85:
+            return doc.id
     return None
 
 def write_chunk(doc_id: str, chunk: dict):
