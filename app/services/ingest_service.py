@@ -14,7 +14,10 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
 
         # 2. Acquire raw text
         raw_text, source_url = acquisition.fetch_novel(title, author)
-
+        firestore.get_client().collection("documents").document(doc_id).update({
+            "source": source_url
+        })
+        
         # 3. Parse + detect chapters
         clean = parser.parse_fetched_text(raw_text)
         chapters = parser.detect_chapters(clean)
