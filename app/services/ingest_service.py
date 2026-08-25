@@ -35,6 +35,9 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
 
         # 7. Mark document ready (chunks done — chapters async)
         firestore.update_status(doc_id, "ready")
+        firestore.get_client().collection("documents").document(doc_id).update({
+            "progress": "chunks ready, chapter summarization in progress"
+        })
 
         # 8. Summarize chapters (async batch — non-blocking for queries)
         chapters_with_text = chapters  # already have text field
@@ -67,6 +70,9 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
             summary_texts = [ch["summary"] for ch in chapter_summaries]
             chapter_vectors = embedder.embed(summary_texts)
             chroma.write_chapter_embeddings(doc_id, chapter_summaries, chapter_vectors)
+            firestore.get_client().collection("documents").document(doc_id).update({
+                "progress": "fully indexed"
+            })
 
     except Exception as e:
         firestore.update_status(doc_id, "failed")
