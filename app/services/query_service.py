@@ -18,16 +18,18 @@ _llm = ChatGroq(
 )
 
 def classify_query_intent(query: str) -> Category | None:
-    model = _llm.with_structured_output(Category)
-    system_prompt = """You are a query-intent classifier for a novel knowledge system.
-Classify the user's query into exactly one category:
-
-- broad: requires overview, summary, multiple concepts, characters, or spans a large portion of the novel.
-- narrow: asks about one specific fact, character, event, chapter, or detail.
-"""
+    llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0, max_tokens=5)
+    system_prompt = """Classify the query as exactly one word: 'broad' or 'narrow'.
+- broad: overview, themes, multiple characters or events, whole book
+- narrow: specific fact, character, event, chapter, or detail
+Reply with only the word. Nothing else."""
     messages = [("system", system_prompt), ("human", query)]
     try:
-        return model.invoke(messages)
+        response = llm.invoke(messages)
+        word = response.content.strip().lower()
+        if "broad" in word:
+            return Category(category="broad")
+        return Category(category="narrow")
     except Exception as e:
         print(f"Classifier failed: {e}")
         return None
