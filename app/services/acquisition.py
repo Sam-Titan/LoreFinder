@@ -13,7 +13,7 @@ from app.core.config import settings
 def search_gutenberg(query: str) -> str:
     """Search Project Gutenberg for a novel. Returns a plain text download URL if found."""
     url = f"https://gutendex.com/books/?search={query}"
-    response = requests.get(url, timeout=10)
+    response = requests.get(url, timeout=20)
     data = response.json()
     if not data["results"]:
         return "Not found on Project Gutenberg."
@@ -31,7 +31,7 @@ def search_gutenberg(query: str) -> str:
 def search_standard_ebooks(query: str) -> str:
     """Search Standard Ebooks for a novel. Returns a page URL if found."""
     url = f"https://standardebooks.org/ebooks?query={query}"
-    response = requests.get(url, timeout=10)
+    response = requests.get(url, timeout=20)
     soup = BeautifulSoup(response.text, "html.parser")
     result = soup.find("article", class_="ebook")
     if not result:
@@ -48,7 +48,7 @@ def search_archive_org(query: str) -> str:
         f"https://archive.org/advancedsearch.php"
         f"?q={query}&fl[]=identifier&rows=1&output=json&mediatype=texts"
     )
-    response = requests.get(url, timeout=10)
+    response = requests.get(url, timeout=20)
     data = response.json()
     docs = data.get("response", {}).get("docs", [])
     if not docs:
@@ -59,7 +59,7 @@ def search_archive_org(query: str) -> str:
 # --- Internal fetch (outside agent loop) ---
 
 def _fetch_url(url: str) -> str:
-    response = requests.get(url, timeout=30)
+    response = requests.get(url, timeout=60)
     content_type = response.headers.get("Content-Type", "")
     if "text/plain" in content_type:
         return response.text
