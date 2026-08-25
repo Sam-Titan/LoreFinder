@@ -23,9 +23,12 @@ def clean_text(text: str) -> str:
 def detect_chapters(text: str) -> list[dict]:
     # Matches patterns like: Chapter 1, CHAPTER ONE, Chapter I
     pattern = re.compile(
-        r"(chapter\s+[\divxlc]+[\s\:\-]*[^\n]*)",
+        r"(chapter\s+(?:[\d]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten"
+        r"|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+        r"|twenty(?:-\w+)?|thirty(?:-\w+)?|forty(?:-\w+)?|fifty(?:-\w+)?|sixty|seventy|eighty|ninety|hundred)[\s\:\-]*[^\n]*)",
         re.IGNORECASE
     )
+    
     matches = list(pattern.finditer(text))
 
     chapters = []
