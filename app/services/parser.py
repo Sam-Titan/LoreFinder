@@ -21,15 +21,13 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 def detect_chapters(text: str) -> list[dict]:
-    # Matches patterns like: Chapter 1, CHAPTER ONE, Chapter I
     pattern = re.compile(
-        r"^((?:chapter|letter)\s+(?:[\d]+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten"
-        r"|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
-        r"|twenty(?:-\w+)?|thirty(?:-\w+)?|forty(?:-\w+)?|fifty(?:-\w+)?|sixty|seventy|eighty|ninety|hundred)"
-        r"[\s\:\-]*[^\n]*)",
-        re.IGNORECASE | re.MULTILINE  # MULTILINE makes ^ match line starts
+        r"^((?:chapter|letter)\s+(?:[\d]+|[ivxlcdm]+|one|two|three|four|five|"
+        r"six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+        r"sixteen|seventeen|eighteen|nineteen|twenty(?:-\w+)?|thirty(?:-\w+)?|"
+        r"forty(?:-\w+)?|fifty(?:-\w+)?)[\s\:\-]*[^\n]*)",
+        re.IGNORECASE | re.MULTILINE
     )
-    
     matches = list(pattern.finditer(text))
 
     chapters = []
@@ -38,16 +36,31 @@ def detect_chapters(text: str) -> list[dict]:
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         chapters.append({
             "chapter_number": i + 1,
-            "chapter_title": match.group(0).strip(),
+            "chapter_title": match.group(0).strip().split("\n")[0][:60],
             "text": text[start:end].strip()
         })
 
-    # If no chapters detected, treat whole text as one chapter
-    if not chapters:
+    # Fallback: split by word count if no chapters found or only 1 detected
+    if len(chapters) <= 1:
+        print("No chapter structure detected — using size-based split.")
+        chapters = _split_by_size(text, target_words=3000)
+
+    return chapters
+
+def _split_by_size(text: str, target_words: int = 3000) -> list[dict]:
+    words = text.split()
+    chapters = []
+    total = len(words)
+    num_chapters = max(1, total // target_words)
+    chunk_size = total // num_chapters
+
+    for i in range(num_chapters):
+        start = i * chunk_size
+        end = (i + 1) * chunk_size if i < num_chapters - 1 else total
         chapters.append({
             "chapter_number": i + 1,
-            "chapter_title": match.group(0).strip().split("\n")[0][:60],  # cap at 60 chars
-            "text": text[start:end].strip()
+            "chapter_title": f"Section {i + 1}",
+            "text": " ".join(words[start:end])
         })
-
+        
     return chapters
