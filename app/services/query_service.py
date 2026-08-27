@@ -18,23 +18,50 @@ _llm = ChatGroq(
     max_retries=2,
 )
 
-def classify_query_intent(query: str) -> Category | None:
-    llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0, max_tokens=5)
-    system_prompt = """Classify the query as exactly one word: 'broad' or 'narrow'.
-- broad: overview, themes, multiple characters or events, whole book
-- narrow: specific fact, character, event, chapter, or detail
-Reply with only the word. Nothing else."""
-    messages = [("system", system_prompt), ("human", query)]
+_BROAD_KEYWORDS = {
+    "summarize", "summary", "overview", "throughout", "overall", "theme",
+    "themes", "arc", "entire", "whole", "pattern", "compare", "across",
+    "journey", "experience", "relationship between", "role of", "significance"
+}
+
+_NARROW_KEYWORDS = {
+    "who", "what is", "when", "where", "which", "name", "how many",
+    "what color", "what did", "exact", "specifically", "chapter", "quote"
+}
+
+def classify_query_intent(query: str) -> Category:
+    q_lower = query.lower()
+
+    # Keyword pre-filter — fast and free
+    broad_hits = sum(1 for kw in _BROAD_KEYWORDS if kw in q_lower)
+    narrow_hits = sum(1 for kw in _NARROW_KEYWORDS if kw in q_lower)
+
+    if broad_hits > narrow_hits:
+        return Category(category="broad")
+    if narrow_hits > broad_hits:
+        return Category(category="narrow")
+
+    # Ambiguous — fall back to LLM
     try:
-        response = llm.invoke(messages)
+        llm = ChatGroq(
+            model=settings.GROQ_MODEL_NAME,
+            temperature=0,
+            max_tokens=5
+        )
+        system_prompt = (
+            "Reply with ONE word only: 'broad' or 'narrow'.\n"
+            "broad = summary, themes, patterns, multiple events or characters.\n"
+            "narrow = one specific fact, name, event, or detail."
+        )
+        response = llm.invoke([("system", system_prompt), ("human", query)])
         word = response.content.strip().lower()
         if "broad" in word:
             return Category(category="broad")
         return Category(category="narrow")
     except Exception as e:
-        print(f"Classifier failed: {e}")
-        return None
-
+        print(f"Classifier failed: {e}. Defaulting to narrow.")
+        return Category(category="narrow")
+    
 def embed_query(query: str) -> list[float]:
     embedder = get_embedder()
     return embedder.embed([query])[0]
@@ -50,20 +77,22 @@ def _assemble_context(results: list[dict]) -> str:
     return "\n\n".join(parts)
 
 def _generate_answer(query: str, context: str) -> str:
-    prompt = f"""You are a literary assistant. Answer the user's question using only the provided context.
-    Always cite the chapter number and chunk index when referencing content.
-    If the answer is not in the context, say so clearly.
-    
-    Context:
-    {context}
-    
-    Question: {query}
-    
-    Answer:"""
+    system_prompt = (
+        "You are a literary assistant. Answer the user's question using only the provided context.\n"
+        "Always cite the chapter/letter number and chunk index when referencing content.\n"
+        "If the answer is not in the context, say so clearly."
+    )
+    human_prompt = f"Context:\n{context}\n\nQuestion: {query}"
+
+    messages = [
+        ("system", system_prompt),
+        ("human", human_prompt)
+    ]
+
     for attempt in range(3):
         try:
             llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0.2, max_tokens=2048, timeout=60)
-            response = llm.invoke(prompt)
+            response = llm.invoke(messages)
             return response.content
         except Exception as e:
             if "rate" in str(e).lower() and attempt < 2:
@@ -72,8 +101,6 @@ def _generate_answer(query: str, context: str) -> str:
             raise
 
 async def run_query_pipeline(doc_id: str, query: str) -> dict:
-    query = query.replace("\u2019", "'").replace("\u2018", "'").strip()
-
     # Parallel: classify + embed
     loop = asyncio.get_event_loop()
     category, query_vector = await asyncio.gather(
