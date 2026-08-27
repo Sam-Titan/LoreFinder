@@ -16,9 +16,16 @@ def ingest_novel_task(self, doc_id: str, title: str, author: str):
     try:
         import asyncio
         asyncio.run(ingest_service.run_novel_ingestion(doc_id, title, author))
+    except ValueError as e:
+        # Permanent failure — novel not found, don't retry
+        print(f"Permanent failure for {title}: {e}")
+        from app.db import firestore
+        firestore.update_status(doc_id, "failed")
+        return  # no retry
     except Exception as e:
+        # Transient failure — network, rate limit, etc — retry
         raise self.retry(exc=e, countdown=30)
-
+    
 @celery_app.task(bind=True, max_retries=2)
 def ingest_pdf_task(self, session_id: str, file_bytes: bytes):
     try:
