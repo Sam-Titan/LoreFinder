@@ -1,4 +1,5 @@
 import chromadb
+from chromadb.config import Settings as ChromaSettings
 from app.core.config import settings
 from datetime import datetime, timezone
 
@@ -7,7 +8,10 @@ _client = None
 def get_client():
     global _client
     if _client is None:
-        _client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_PATH)
+        _client = chromadb.PersistentClient(
+            path=settings.CHROMA_PERSIST_PATH,
+            settings=ChromaSettings(anonymized_telemetry=False)
+        )
     return _client
 
 def get_chunk_collection(doc_id: str):

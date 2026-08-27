@@ -1,6 +1,11 @@
 from pydantic_settings import BaseSettings
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class Settings(BaseSettings):
+    CHROMA_PERSIST_PATH: str = os.path.join(BASE_DIR, "chroma_store")
+
     # LLMs
     GROQ_API_KEY: str
     GEMINI_API_KEY: str
