@@ -15,7 +15,17 @@ async def ingest_novel(payload: IngestNovelRequest):
         doc = firestore.get_document(existing_doc_id)
         status = doc.get("status")
 
-        # Recovery: if stuck in processing > 10 min, restart
+        # Allow retry on failed
+        if status == "failed":
+            firestore.update_status(existing_doc_id, "pending")
+            ingest_novel_task.delay(existing_doc_id, payload.novel_name, payload.author_name)
+            return IngestStatusResponse(
+                doc_id=existing_doc_id,
+                status="pending",
+                message="Previous attempt failed. Restarting ingestion."
+            )
+
+        # Recovery: stuck in processing > 10 min
         if status == "processing":
             ingested_at = doc.get("ingested_at")
             if ingested_at:
@@ -28,11 +38,6 @@ async def ingest_novel(payload: IngestNovelRequest):
                         status="pending",
                         message="Previous ingestion timed out. Restarted."
                     )
-            return IngestStatusResponse(
-                doc_id=existing_doc_id,
-                status="processing",
-                message="Novel is currently being ingested."
-            )
 
         return IngestStatusResponse(
             doc_id=existing_doc_id,
