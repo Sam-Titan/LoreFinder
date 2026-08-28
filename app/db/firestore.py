@@ -83,3 +83,19 @@ def get_chunks_by_ids(doc_id: str, chunk_ids: list[str]) -> list[dict]:
         .stream()
     )
     return [doc.to_dict() for doc in docs]
+
+def update_field(doc_id: str, field: str, value):
+    db = get_client()
+    db.collection("documents").document(doc_id).update({field: value})
+
+def get_chunks_by_chapter(doc_id: str, chapter_number: int) -> list[dict]:
+    db = get_client()
+    from google.cloud.firestore_v1.base_query import FieldFilter
+    docs = (
+        db.collection("documents")
+        .document(doc_id)
+        .collection("chunks")
+        .where(filter=FieldFilter("chapter_number", "==", chapter_number))
+        .stream()
+    )
+    return [doc.to_dict() for doc in docs]

@@ -29,7 +29,7 @@ async def _summarize_one(chapter: dict) -> dict:
         chapter["status"] = "failed"
     return chapter
 
-async def summarize_chapters(chapters: list[dict]) -> list[dict]:
+async def summarize_chapters(chapters: list[dict], on_complete=None) -> list[dict]:
     results = []
     batch_size = 5
     for i in range(0, len(chapters), batch_size):
@@ -37,7 +37,14 @@ async def summarize_chapters(chapters: list[dict]) -> list[dict]:
         batch_results = await asyncio.gather(
             *[_summarize_one(ch) for ch in batch]
         )
+        for ch in batch_results:
+            if ch["status"] == "complete" and on_complete:
+                await on_complete(ch)  # save immediately after each chapter
         results.extend(batch_results)
         if i + batch_size < len(chapters):
             await asyncio.sleep(20)
+
+    failed = [r for r in results if r["status"] == "failed"]
+    if len(failed) == len(results):
+        raise RuntimeError("All chapter summarizations failed.")
     return results

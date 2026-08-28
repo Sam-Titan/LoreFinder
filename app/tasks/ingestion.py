@@ -53,3 +53,8 @@ celery_app.conf.beat_schedule = {
         "schedule": 1800.0  # 30 minutes in seconds
     }
 }
+
+celery_app.conf.update(
+    task_acks_late=True,              # only remove from queue after success
+    task_reject_on_worker_lost=True   # requeue if worker dies mid-task
+)
