@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     CHROMA_PERSIST_PATH: str = "./chroma_store"
 
     # Embedding
-    EMBEDDING_MODEL_NAME: str = "all-MiniLM-L6-v2"
+    EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
 
     # Groq and Gemini Model Names
     GROQ_MODEL_NAME: str = "openai/gpt-oss-20b"
