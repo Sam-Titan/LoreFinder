@@ -5,6 +5,7 @@ from app.schemas.ingest_schema import IngestNovelRequest, IngestStatusResponse
 from app.services.ingest_service import check_duplicate
 from app.db import firestore
 from app.tasks.ingestion import ingest_novel_task, ingest_pdf_task
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -54,7 +55,7 @@ async def ingest_novel(payload: IngestNovelRequest):
         "source": None,
         "status": "pending",
         "ingested_at": datetime.now(timezone.utc).isoformat(),
-        "embedding_model": "all-MiniLM-L6-v2"
+        "embedding_model": settings.EMBEDDING_MODEL_NAME
     })
 
     # 3. Enqueue background task
