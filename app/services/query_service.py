@@ -62,9 +62,32 @@ def classify_query_intent(query: str) -> Category:
         print(f"Classifier failed: {e}. Defaulting to narrow.")
         return Category(category="narrow")
     
+def _expand_query(query: str) -> list[str]:
+    try:
+        llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0.2, max_tokens=120)
+        prompt = (
+            "Rephrase this question in 2 different ways to improve search results.\n"
+            "Do NOT answer it. Just rephrase.\n"
+            "Output exactly 2 lines, one rephrasing per line.\n\n"
+            f"Question: {query}"
+        )
+        response = llm.invoke([("human", prompt)])
+        rephrases = [
+            q.strip().lstrip("123.-) ")
+            for q in response.content.strip().split("\n")
+            if q.strip()
+        ]
+        return [query] + rephrases[:2]
+    except Exception:
+        return [query]
+
 def embed_query(query: str) -> list[float]:
+    queries = _expand_query(query)
     embedder = get_embedder()
-    return embedder.embed([query])[0]
+    vectors = embedder.embed(queries)
+    # Average embeddings — covers more semantic space than a single vector
+    import numpy as np
+    return np.mean(vectors, axis=0).tolist()
 
 def _assemble_context(results: list[dict]) -> str:
     parts = []
