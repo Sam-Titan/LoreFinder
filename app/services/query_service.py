@@ -21,7 +21,7 @@ _llm = ChatGroq(
 _BROAD_KEYWORDS = {
     "summarize", "summary", "overview", "throughout", "overall", "theme",
     "themes", "arc", "entire", "whole", "pattern", "compare", "across",
-    "journey", "experience", "relationship between", "role of", "significance"
+    "journey", "experience", "relationship between", "role of", "significance", "describe"
 }
 
 _NARROW_KEYWORDS = {
@@ -101,9 +101,14 @@ def _assemble_context(results: list[dict]) -> str:
 
 def _generate_answer(query: str, context: str) -> str:
     system_prompt = (
-        "You are a literary assistant. Answer the user's question using only the provided context.\n"
-        "Always cite the chapter/letter number and chunk index when referencing content.\n"
-        "If the answer is not in the context, say so clearly."
+        "You are an expert literary analyst. Answer the question using ONLY the provided excerpts.\n\n"
+        "Rules:\n"
+        "1. Never use knowledge outside the provided context.\n"
+        "2. Write in clear flowing prose. Avoid bullet points unless listing items is essential.\n"
+        "3. Cite sources inline as (Ch. X, Chunk Y) after each claim.\n"
+        "4. If the context lacks the answer, respond only with: "
+        "'The provided excerpts do not contain enough information to answer this question.'\n"
+        "5. Be thorough but do not repeat yourself or pad the response."
     )
     human_prompt = f"Context:\n{context}\n\nQuestion: {query}"
 
@@ -116,6 +121,8 @@ def _generate_answer(query: str, context: str) -> str:
         try:
             llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0.2, max_tokens=2048, timeout=60)
             response = llm.invoke(messages)
+            if not response.content.strip():
+                return "The AI safety guardrails prevented generating an answer due to the sensitive or graphic nature of the text."
             return response.content
         except Exception as e:
             if "rate" in str(e).lower() and attempt < 2:
@@ -137,6 +144,9 @@ async def run_query_pipeline(doc_id: str, query: str) -> dict:
     if is_pdf:
         results = retriever.retrieve_temp(doc_id, query_vector)
     elif category and category.category == "broad":
+        doc = firestore.get_document(doc_id)
+        if doc.get("progress") == "chunks ready, chapter summarization in progress":
+            raise ValueError("Chapter summaries are still being processed. Please try a narrow query or wait until fully indexed.")
         chapters = firestore.get_chapters(doc_id)
         all_chapter_numbers = [ch["chapter_number"] for ch in chapters]
         results = retriever.retrieve_broad(doc_id, query_vector, all_chapter_numbers)
