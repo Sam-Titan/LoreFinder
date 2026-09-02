@@ -18,9 +18,17 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
 
             # Phase 1: Acquire, parse, chunk, embed, write
             raw_text, source_url = acquisition.fetch_novel(title, author)
+
+            if len(raw_text.strip()) < 5000:
+                raise ValueError(f"Fetched content too short — likely a fetch failure for '{title}'.")
+
+            if len(raw_text) > 10_000_000:  # 10MB cap
+                raw_text = raw_text[:10_000_000]
+                print(f"Warning: '{title}' truncated to 10MB.")
+                
             firestore.update_field(doc_id, "source", source_url)
 
-            clean = parser.parse_fetched_text(raw_text)
+            clean = parser.parse_fetched_text(raw_text, source_url=source_url)
             chapters = parser.detect_chapters(clean)
             chunks = chunker.chunk_text(chapters)
 
