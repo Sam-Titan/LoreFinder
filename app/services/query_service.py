@@ -101,14 +101,11 @@ def _assemble_context(results: list[dict]) -> str:
 
 def _generate_answer(query: str, context: str) -> str:
     system_prompt = (
-        "You are an expert literary analyst. Answer the question using ONLY the provided excerpts.\n\n"
-        "Rules:\n"
-        "1. Never use knowledge outside the provided context.\n"
-        "2. Write in clear flowing prose. Avoid bullet points unless listing items is essential.\n"
-        "3. Cite sources inline as (Ch. X, Chunk Y) after each claim.\n"
-        "4. If the context lacks the answer, respond only with: "
-        "'The provided excerpts do not contain enough information to answer this question.'\n"
-        "5. Be thorough but do not repeat yourself or pad the response."
+        "You are a literary analyst specializing in classic and contemporary fiction. "
+        "You are analyzing published, publicly available novels for academic and educational purposes. "
+        "Answer the user's question using only the provided excerpts from the text. "
+        "Always cite the chapter/letter number and chunk index when referencing content. "
+        "If the answer is not in the context, say so clearly."
     )
     human_prompt = f"Context:\n{context}\n\nQuestion: {query}"
 
@@ -122,7 +119,10 @@ def _generate_answer(query: str, context: str) -> str:
             llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0.2, max_tokens=2048, timeout=60)
             response = llm.invoke(messages)
             if not response.content.strip():
-                return "The AI safety guardrails prevented generating an answer due to the sensitive or graphic nature of the text."
+                return (
+                    "This passage contains content that couldn't be summarized directly. "
+                    "Try asking about a specific character, event, or theme from this section."
+                )
             return response.content
         except Exception as e:
             if "rate" in str(e).lower() and attempt < 2:

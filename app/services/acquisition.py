@@ -7,7 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.core.config import settings
 import time
 
-def _safe_get(url: str, timeout: int = 20, retries: int = 3) -> requests.Response:
+def _safe_get(url: str, timeout: int = 30, retries: int = 3) -> requests.Response:
     for attempt in range(retries):
         try:
             response = requests.get(url, timeout=timeout)
@@ -76,11 +76,20 @@ def search_archive_org(query: str) -> str:
 # --- Internal fetch (outside agent loop) ---
 
 def _fetch_url(url: str) -> str:
-    response = requests.get(url, timeout=60)
+    # Stream large files instead of loading into memory at once
+    response = requests.get(url, timeout=120, stream=True)
     content_type = response.headers.get("Content-Type", "")
+
+    chunks = []
+    for chunk in response.iter_content(chunk_size=8192, decode_unicode=True):
+        if chunk:
+            chunks.append(chunk)
+    raw = "".join(chunks)
+
     if "text/plain" in content_type:
-        return response.text
-    soup = BeautifulSoup(response.text, "html.parser")
+        return raw
+
+    soup = BeautifulSoup(raw, "html.parser")
     return soup.get_text(separator="\n")
 
 # --- Agent ---

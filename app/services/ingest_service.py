@@ -4,6 +4,8 @@ from app.db import firestore, chroma
 from app.services import acquisition, parser, chunker, summarizer
 from app.services.embedder import get_embedder
 
+MAX_SUMMARY_CHAPTERS = 100
+
 async def check_duplicate(title: str, author: str) -> str | None:
     return firestore.check_exists(title, author)
 
@@ -20,9 +22,8 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
             raw_text, source_url = acquisition.fetch_novel(title, author)
 
             if len(raw_text.strip()) < 5000:
-                raise ValueError(f"Fetched content too short — likely a fetch failure for '{title}'.")
-
-            if len(raw_text) > 10_000_000:  # 10MB cap
+                raise ValueError(f"Fetched content too short for '{title}'.")
+            if len(raw_text) > 10_000_000:
                 raw_text = raw_text[:10_000_000]
                 print(f"Warning: '{title}' truncated to 10MB.")
                 
@@ -55,15 +56,25 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
             }
 
             chapter_count = firestore.get_document(doc_id).get("chapter_count", 0)
+
+            # Cap summarization to stay within free tier daily limits
+            chapters_to_summarize = min(chapter_count, MAX_SUMMARY_CHAPTERS)
+
+            if chapter_count > MAX_SUMMARY_CHAPTERS:
+                print(
+                    f"Novel has {chapter_count} chapters — "
+                    f"summarizing first {MAX_SUMMARY_CHAPTERS} only."
+                )
+
             pending_numbers = [
-                n for n in range(1, chapter_count + 1)
+                n for n in range(1, chapters_to_summarize + 1)
                 if n not in done_numbers
             ]
 
             if not pending_numbers:
                 phase = "summarization_complete"
             else:
-                # Reconstruct chapter text from existing chunks — no re-fetch needed
+                # Reconstruct chapter text from stored chunks — no re-fetch needed
                 pending_chapters = []
                 for num in pending_numbers:
                     chunk_docs = firestore.get_chunks_by_chapter(doc_id, num)
@@ -78,10 +89,9 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
                         "status": "pending"
                     })
 
-                # Checkpoint: save each chapter immediately after summarization
+                # Per-chapter checkpoint — saves immediately after each summary
                 async def save_chapter(ch: dict):
-                    chunk_docs = firestore.get_chunks_by_chapter(doc_id,
-                                                                 ch["chapter_number"])
+                    chunk_docs = firestore.get_chunks_by_chapter(doc_id, ch["chapter_number"])
                     chapter_record = {
                         "chapter_id": f"ch_{uuid.uuid4().hex[:10]}",
                         "doc_id": doc_id,
@@ -122,8 +132,7 @@ async def run_pdf_ingestion(session_id: str, file_bytes: bytes):
 
         # 3. Embed + write to temp Chroma only (no Firestore)
         embedder = get_embedder()
-        chunk_texts = [c["chunk_text"] for c in chunks]
-        vectors = embedder.embed(chunk_texts)
+        vectors = embedder.embed([c["chunk_text"] for c in chunks])
         chroma.write_temp_embeddings(session_id, chunks, vectors)
 
     except Exception as e:
