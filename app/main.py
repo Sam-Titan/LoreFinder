@@ -1,7 +1,29 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.api import query, ingest
 
 app = FastAPI(title="Dawn")
+
+# Explicit OPTIONS handler — catches preflight before routing
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(request: Request, rest_of_path: str):
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # wildcard for dev
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(ingest.router, prefix="/ingest", tags=["Ingestion"])
 app.include_router(query.router, prefix="/query", tags=["Query"])
