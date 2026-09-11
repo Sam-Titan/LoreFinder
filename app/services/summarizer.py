@@ -13,20 +13,30 @@ Chapter text:
 {text}
 """
 
-async def _summarize_one(chapter: dict) -> dict:
+async def _summarize_one(chapter: dict, max_attempts: int = 3) -> dict:
     prompt = _PROMPT.format(text=chapter["text"][:8000])
-    try:
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=settings.GEMINI_MODEL_NAME,
-            contents=prompt
-        )
-        chapter["summary"] = response.text.strip()
-        chapter["status"] = "complete"
-    except Exception as e:
-        print(f"Chapter {chapter['chapter_number']} summarization failed: {e}")
-        chapter["summary"] = ""
-        chapter["status"] = "failed"
+    last_error = None
+    for attempt in range(max_attempts):
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=settings.GEMINI_MODEL_NAME,
+                contents=prompt
+            )
+            chapter["summary"] = response.text.strip()
+            chapter["status"] = "complete"
+            return chapter
+        except Exception as e:
+            last_error = e
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(2 ** attempt * 5)  # 5s, 10s
+
+    print(
+        f"Chapter {chapter['chapter_number']} summarization failed after "
+        f"{max_attempts} attempts: {last_error}"
+    )
+    chapter["summary"] = ""
+    chapter["status"] = "failed"
     return chapter
 
 async def summarize_chapters(chapters: list[dict], on_complete=None) -> list[dict]:
@@ -45,6 +55,14 @@ async def summarize_chapters(chapters: list[dict], on_complete=None) -> list[dic
             await asyncio.sleep(20)
 
     failed = [r for r in results if r["status"] == "failed"]
-    if len(failed) == len(results):
-        raise RuntimeError("All chapter summarizations failed.")
+    if failed:
+        # Raise on ANY leftover failure (not just total failure) — the caller's
+        # exception propagates up to the Celery task, which retries the whole
+        # ingestion. The existing phase/resumability logic then only reprocesses
+        # chapters still not marked "complete", so successful ones aren't redone.
+        failed_numbers = [r["chapter_number"] for r in failed]
+        raise RuntimeError(
+            f"Chapter summarization failed for chapters {failed_numbers} "
+            f"after retries ({len(failed)}/{len(results)})."
+        )
     return results
