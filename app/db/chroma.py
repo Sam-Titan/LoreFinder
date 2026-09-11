@@ -64,33 +64,38 @@ def write_temp_embeddings(session_id: str, chunks: list[dict], vectors: list[lis
         } for c in chunks]
     )
 
-def search_chunks(doc_id: str, query_vector: list[float], top_k: int, chapter_numbers: list[int] = None) -> list[dict]:
+def search_chunks(
+    doc_id: str,
+    query_vectors: list[list[float]],
+    top_k: int,
+    chapter_numbers: list[int] = None
+) -> list[list[dict]]:
     collection = get_chunk_collection(doc_id)
     query_kwargs = {
-    "query_embeddings": [query_vector],
+    "query_embeddings": query_vectors,
     "n_results": top_k
     }
     if chapter_numbers:
         query_kwargs["where"] = {"chapter_number": {"$in": chapter_numbers}}
 
     results = collection.query(**query_kwargs)
-    return _format_results(results)
+    return _format_results_multi(results)
 
-def search_chapters(doc_id: str, query_vector: list[float], top_n: int) -> list[dict]:
+def search_chapters(doc_id: str, query_vectors: list[list[float]], top_n: int) -> list[list[dict]]:
     collection = get_chapter_collection(doc_id)
     results = collection.query(
-        query_embeddings=[query_vector],
+        query_embeddings=query_vectors,
         n_results=top_n
     )
-    return _format_results(results)
+    return _format_results_multi(results)
 
-def search_temp(session_id: str, query_vector: list[float], top_k: int) -> list[dict]:
+def search_temp(session_id: str, query_vectors: list[list[float]], top_k: int) -> list[list[dict]]:
     collection = get_temp_collection(session_id)
     results = collection.query(
-        query_embeddings=[query_vector],
+        query_embeddings=query_vectors,
         n_results=top_k
     )
-    return _format_results(results)
+    return _format_results_multi(results)
 
 def delete_temp_collection(session_id: str):
     get_client().delete_collection(f"temp_{session_id}")
@@ -110,13 +115,16 @@ def list_stale_collections(ttl_hours: int) -> list[str]:
                 stale.append(col.name.replace("temp_", ""))
     return stale
 
-def _format_results(results: dict) -> list[dict]:
-    formatted = []
-    for i, doc_id in enumerate(results["ids"][0]):
-        formatted.append({
-            "id": doc_id,
-            "document": results["documents"][0][i],
-            "metadata": results["metadatas"][0][i],
-            "score": results["distances"][0][i] if "distances" in results else None
-        })
-    return formatted
+def _format_results_multi(results: dict) -> list[list[dict]]:
+    all_formatted = []
+    for qi in range(len(results["ids"])):
+        formatted = []
+        for i, doc_id in enumerate(results["ids"][qi]):
+            formatted.append({
+                "id": doc_id,
+                "document": results["documents"][qi][i],
+                "metadata": results["metadatas"][qi][i],
+                "score": results["distances"][qi][i] if "distances" in results else None
+            })
+        all_formatted.append(formatted)
+    return all_formatted
