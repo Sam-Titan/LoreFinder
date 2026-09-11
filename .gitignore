@@ -45,6 +45,11 @@ dist
 dist-ssr
 *.local
 
+# Local-only dev files
+CLAUDE.md
+document_deletion.py
+chroma_store/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
