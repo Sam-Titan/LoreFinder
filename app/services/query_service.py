@@ -4,7 +4,7 @@ from langchain_groq import ChatGroq
 from app.core.config import settings
 from app.schemas.query_schema import Category
 from app.services.embedder import get_embedder
-from app.services import retriever
+from app.services import retriever, reranker, bm25_index
 from app.db import firestore
 import time
 
@@ -81,21 +81,20 @@ def _expand_query(query: str) -> list[str]:
     except Exception:
         return [query]
 
-def embed_query(query: str) -> list[float]:
+def embed_query(query: str) -> list[list[float]]:
     queries = _expand_query(query)
     embedder = get_embedder()
-    vectors = embedder.embed(queries)
-    # Average embeddings — covers more semantic space than a single vector
-    import numpy as np
-    return np.mean(vectors, axis=0).tolist()
+    # Return one vector per phrasing — searched and merged separately downstream
+    # instead of averaged, so no single phrasing's signal gets diluted.
+    return embedder.embed(queries)
 
 def _assemble_context(results: list[dict]) -> str:
     parts = []
     for r in results:
         meta = r["metadata"]
+        label = meta.get("chapter_title") or f"Chapter {meta.get('chapter_number')}"
         parts.append(
-            f"[Chapter {meta.get('chapter_number')}, "
-            f"Chunk {meta.get('chunk_index')}]\n{r['document']}"
+            f"[{label}, Chunk {meta.get('chunk_index')}]\n{r['document']}"
         )
     return "\n\n".join(parts)
 
@@ -116,7 +115,13 @@ def _generate_answer(query: str, context: str) -> str:
 
     for attempt in range(3):
         try:
-            llm = ChatGroq(model=settings.GROQ_MODEL_NAME, temperature=0.2, max_tokens=2048, timeout=60)
+            llm = ChatGroq(
+                model=settings.GROQ_MODEL_NAME,
+                temperature=0.2,
+                max_tokens=4096,
+                reasoning_effort="low",
+                timeout=60,
+            )
             response = llm.invoke(messages)
             if not response.content.strip():
                 return (
@@ -130,10 +135,23 @@ def _generate_answer(query: str, context: str) -> str:
                 continue
             raise
 
+_CANDIDATE_K = 15  # wide candidate pool per query variant — cheap, vector-DB only
+_BM25_K = 10         # lexical candidates added alongside the vector pool
+_FINAL_K = 5          # narrowed down by the reranker before reaching the LLM
+
+def _union_by_id(*groups: list[dict]) -> list[dict]:
+    # No score-scale reconciliation needed — the reranker independently re-scores
+    # every candidate against the raw query, regardless of which source found it.
+    seen = {}
+    for group in groups:
+        for item in group:
+            seen.setdefault(item["id"], item)
+    return list(seen.values())
+
 async def run_query_pipeline(doc_id: str, query: str) -> dict:
     # Parallel: classify + embed
     loop = asyncio.get_event_loop()
-    category, query_vector = await asyncio.gather(
+    category, query_vectors = await asyncio.gather(
         loop.run_in_executor(None, classify_query_intent, query),
         loop.run_in_executor(None, embed_query, query)
     )
@@ -142,19 +160,29 @@ async def run_query_pipeline(doc_id: str, query: str) -> dict:
     is_pdf = doc_id.startswith("session_")
 
     if is_pdf:
-        results = retriever.retrieve_temp(doc_id, query_vector)
+        candidates = retriever.retrieve_temp(doc_id, query_vectors, top_k=_CANDIDATE_K)
     elif category and category.category == "broad":
         doc = firestore.get_document(doc_id)
         if doc.get("progress") == "chunks ready, chapter summarization in progress":
             raise ValueError("Chapter summaries are still being processed. Please try a narrow query or wait until fully indexed.")
         chapters = firestore.get_chapters(doc_id)
         all_chapter_numbers = [ch["chapter_number"] for ch in chapters]
-        results = retriever.retrieve_broad(doc_id, query_vector, all_chapter_numbers)
+        vector_candidates = retriever.retrieve_broad(
+            doc_id, query_vectors, all_chapter_numbers, top_k=_CANDIDATE_K
+        )
+        lexical_candidates = bm25_index.search_chunks(doc_id, query, top_k=_BM25_K)
+        candidates = _union_by_id(vector_candidates, lexical_candidates)
     else:
-        results = retriever.retrieve_narrow(doc_id, query_vector)
+        vector_candidates = retriever.retrieve_narrow(doc_id, query_vectors, top_k=_CANDIDATE_K)
+        lexical_candidates = bm25_index.search_chunks(doc_id, query, top_k=_BM25_K)
+        candidates = _union_by_id(vector_candidates, lexical_candidates)
 
-    if not results:
+    if not candidates:
         raise ValueError("No relevant content found for this query.")
+
+    # Cross-encoder reranks the wide candidate pool against the raw query text,
+    # then only the top _FINAL_K reach the LLM — context size to the model is unchanged.
+    results = reranker.rerank(query, candidates, top_k=_FINAL_K)
 
     context = _assemble_context(results)
     answer = _generate_answer(query, context)
