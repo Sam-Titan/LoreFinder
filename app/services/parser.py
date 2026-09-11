@@ -71,10 +71,10 @@ def clean_text(text: str) -> str:
 
 def detect_chapters(text: str) -> list[dict]:
     pattern = re.compile(
-        r"^((?:chapter|letter)\s+(?:[\d]+|[ivxlcdm]+|one|two|three|four|five|"
+        r"^[ \t]*((?:chapter|letter)\s+(?:[\d]+|[ivxlcdm]+|one|two|three|four|five|"
         r"six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
         r"sixteen|seventeen|eighteen|nineteen|twenty(?:-\w+)?|thirty(?:-\w+)?|"
-        r"forty(?:-\w+)?|fifty(?:-\w+)?)[\s\:\-\.]*[^\n]*)",  # added \. here
+        r"forty(?:-\w+)?|fifty(?:-\w+)?)\b[\s\:\-\.]*[^\n]*)",  # added \. here
         re.IGNORECASE | re.MULTILINE
     )
     matches = list(pattern.finditer(text))
