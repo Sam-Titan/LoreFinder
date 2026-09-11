@@ -25,7 +25,9 @@ def get_temp_collection(session_id: str):
 
 def write_chunk_embeddings(doc_id: str, chunks: list[dict], vectors: list[list[float]]):
     collection = get_chunk_collection(doc_id)
-    collection.add(
+    # upsert (not add) — chunk_id is deterministic, so a retried ingestion
+    # overwrites in place instead of erroring or duplicating.
+    collection.upsert(
         ids=[c["chunk_id"] for c in chunks],
         embeddings=vectors,
         documents=[c["chunk_text"] for c in chunks],
@@ -39,7 +41,9 @@ def write_chunk_embeddings(doc_id: str, chunks: list[dict], vectors: list[list[f
 
 def write_chapter_embeddings(doc_id: str, chapters: list[dict], vectors: list[list[float]]):
     collection = get_chapter_collection(doc_id)
-    collection.add(
+    # upsert (not add) — chapter_id is deterministic, so a retried summarization
+    # pass overwrites in place instead of erroring or duplicating.
+    collection.upsert(
         ids=[c["chapter_id"] for c in chapters],
         embeddings=vectors,
         documents=[c["summary"] for c in chapters],

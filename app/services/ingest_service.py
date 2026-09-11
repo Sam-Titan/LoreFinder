@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime, timezone
 from app.db import firestore, chroma
 from app.services import acquisition, parser, chunker, summarizer
@@ -19,14 +18,21 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
             firestore.update_status(doc_id, "processing")
 
             # Phase 1: Acquire, parse, chunk, embed, write
-            raw_text, source_url = acquisition.fetch_novel(title, author)
+            existing_source = doc.get("source")
+            if existing_source:
+                # Retrying after a prior partial attempt — the source was already
+                # found, so re-fetch directly instead of re-running the agent search.
+                raw_text = acquisition.fetch_url(existing_source)
+                source_url = existing_source
+            else:
+                raw_text, source_url = acquisition.fetch_novel(title, author)
 
             if len(raw_text.strip()) < 5000:
                 raise ValueError(f"Fetched content too short for '{title}'.")
             if len(raw_text) > 10_000_000:
                 raw_text = raw_text[:10_000_000]
                 print(f"Warning: '{title}' truncated to 10MB.")
-                
+
             firestore.update_field(doc_id, "source", source_url)
 
             clean = parser.parse_fetched_text(raw_text, source_url=source_url)
@@ -36,6 +42,10 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
             chunk_vectors = embedder.embed([c["chunk_text"] for c in chunks])
             for chunk in chunks:
                 chunk["doc_id"] = doc_id
+                # Deterministic id — a retry overwrites the same chunk in place
+                # (via upsert) instead of creating an orphaned duplicate.
+                cn, ci = chunk["chapter_number"], chunk["chunk_index"]
+                chunk["chunk_id"] = f"chunk_{doc_id}_{cn}_{ci}"
                 firestore.write_chunk(doc_id, chunk)
             chroma.write_chunk_embeddings(doc_id, chunks, chunk_vectors)
 
@@ -93,7 +103,9 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
                 async def save_chapter(ch: dict):
                     chunk_docs = firestore.get_chunks_by_chapter(doc_id, ch["chapter_number"])
                     chapter_record = {
-                        "chapter_id": f"ch_{uuid.uuid4().hex[:10]}",
+                        # Deterministic id — a retry overwrites the same chapter in
+                        # place (via upsert) instead of creating an orphaned duplicate.
+                        "chapter_id": f"ch_{doc_id}_{ch['chapter_number']}",
                         "doc_id": doc_id,
                         "chapter_number": ch["chapter_number"],
                         "chapter_title": ch["chapter_title"],

@@ -75,7 +75,7 @@ def search_archive_org(query: str) -> str:
 
 # --- Internal fetch (outside agent loop) ---
 
-def _fetch_url(url: str) -> str:
+def fetch_url(url: str) -> str:
     # Stream large files instead of loading into memory at once
     response = requests.get(url, timeout=120, stream=True)
     content_type = response.headers.get("Content-Type", "")
@@ -130,7 +130,7 @@ Return only the raw download URL. Nothing else."""),
         raise ValueError(f"Could not locate '{title}' by {author} on any source.")
 
     # Fetch text directly — not through the agent
-    raw_text = _fetch_url(source_url)
+    raw_text = fetch_url(source_url)
 
     if not raw_text.strip():
         raise ValueError(f"Fetched empty content from {source_url}.")
