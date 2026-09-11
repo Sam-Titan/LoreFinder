@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import os
 from langchain_groq import ChatGroq
 from app.core.config import settings
@@ -149,32 +150,44 @@ def _union_by_id(*groups: list[dict]) -> list[dict]:
     return list(seen.values())
 
 async def run_query_pipeline(doc_id: str, query: str) -> dict:
-    # Parallel: classify + embed
+    # Every call below is blocking (Firestore/Chroma I/O, CPU-bound BM25/rerank
+    # scoring, a synchronous Groq request). Each is run via run_in_executor so it
+    # can't stall the event loop for other concurrent requests while it runs.
     loop = asyncio.get_event_loop()
+
+    def run(func, *args, **kwargs):
+        return loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
+
+    # Parallel: classify + embed
     category, query_vectors = await asyncio.gather(
-        loop.run_in_executor(None, classify_query_intent, query),
-        loop.run_in_executor(None, embed_query, query)
+        run(classify_query_intent, query),
+        run(embed_query, query)
     )
 
     # Route based on doc type and category
     is_pdf = doc_id.startswith("session_")
 
     if is_pdf:
-        candidates = retriever.retrieve_temp(doc_id, query_vectors, top_k=_CANDIDATE_K)
+        candidates = await run(retriever.retrieve_temp, doc_id, query_vectors, top_k=_CANDIDATE_K)
     elif category and category.category == "broad":
-        doc = firestore.get_document(doc_id)
+        doc = await run(firestore.get_document, doc_id)
         if doc.get("progress") == "chunks ready, chapter summarization in progress":
             raise ValueError("Chapter summaries are still being processed. Please try a narrow query or wait until fully indexed.")
-        chapters = firestore.get_chapters(doc_id)
+        chapters = await run(firestore.get_chapters, doc_id)
         all_chapter_numbers = [ch["chapter_number"] for ch in chapters]
-        vector_candidates = retriever.retrieve_broad(
-            doc_id, query_vectors, all_chapter_numbers, top_k=_CANDIDATE_K
+        vector_candidates, lexical_candidates = await asyncio.gather(
+            run(
+                retriever.retrieve_broad, doc_id, query_vectors,
+                all_chapter_numbers, top_k=_CANDIDATE_K
+            ),
+            run(bm25_index.search_chunks, doc_id, query, top_k=_BM25_K)
         )
-        lexical_candidates = bm25_index.search_chunks(doc_id, query, top_k=_BM25_K)
         candidates = _union_by_id(vector_candidates, lexical_candidates)
     else:
-        vector_candidates = retriever.retrieve_narrow(doc_id, query_vectors, top_k=_CANDIDATE_K)
-        lexical_candidates = bm25_index.search_chunks(doc_id, query, top_k=_BM25_K)
+        vector_candidates, lexical_candidates = await asyncio.gather(
+            run(retriever.retrieve_narrow, doc_id, query_vectors, top_k=_CANDIDATE_K),
+            run(bm25_index.search_chunks, doc_id, query, top_k=_BM25_K)
+        )
         candidates = _union_by_id(vector_candidates, lexical_candidates)
 
     if not candidates:
@@ -182,10 +195,10 @@ async def run_query_pipeline(doc_id: str, query: str) -> dict:
 
     # Cross-encoder reranks the wide candidate pool against the raw query text,
     # then only the top _FINAL_K reach the LLM — context size to the model is unchanged.
-    results = reranker.rerank(query, candidates, top_k=_FINAL_K)
+    results = await run(reranker.rerank, query, candidates, top_k=_FINAL_K)
 
     context = _assemble_context(results)
-    answer = _generate_answer(query, context)
+    answer = await run(_generate_answer, query, context)
 
     citations = [
         {
