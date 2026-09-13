@@ -1,9 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 class IngestNovelRequest(BaseModel):
-    novel_name: str
-    author_name: str
+    novel_name: str = Field(..., min_length=1, max_length=200)
+    author_name: str = Field(..., min_length=1, max_length=200)
 
 class IngestPDFRequest(BaseModel):
     # File itself is handled via FastAPI's UploadFile, not Pydantic

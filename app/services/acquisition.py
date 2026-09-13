@@ -1,3 +1,4 @@
+from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 from langchain.tools import tool
@@ -92,6 +93,25 @@ def fetch_url(url: str) -> str:
     soup = BeautifulSoup(raw, "html.parser")
     return soup.get_text(separator="\n")
 
+# --- Source allowlist (SSRF guard) ---
+
+_ALLOWED_HOSTS = {"gutenberg.org", "gutendex.com", "standardebooks.org", "archive.org"}
+
+def _is_allowed_source(url: str) -> bool:
+    # The agent's final answer is LLM-generated text, not a guaranteed tool
+    # result — a crafted title/author could coerce it into returning an
+    # arbitrary URL. Never fetch anything outside the sources we actually
+    # searched, so the LLM can't be used to make this server request
+    # attacker-chosen (including internal/private) hosts.
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in _ALLOWED_HOSTS)
+
 # --- Agent ---
 
 def fetch_novel(title: str, author: str) -> tuple[str, str]:
@@ -128,6 +148,9 @@ Return only the raw download URL. Nothing else."""),
 
     if not source_url or "not found" in source_url.lower():
         raise ValueError(f"Could not locate '{title}' by {author} on any source.")
+
+    if not _is_allowed_source(source_url):
+        raise ValueError(f"Refusing to fetch from an untrusted source: {source_url}")
 
     # Fetch text directly — not through the agent
     raw_text = fetch_url(source_url)

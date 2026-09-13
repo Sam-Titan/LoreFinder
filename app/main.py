@@ -1,9 +1,20 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from app.api import query, ingest
+from app.core.limiter import limiter
 
 app = FastAPI(title="Dawn")
+
+# Per-IP rate limiting — the app is intentionally open to everyone with no
+# accounts, so this (not auth) is what keeps one visitor from exhausting the
+# Groq/Gemini quota or the server for everyone else.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # Explicit OPTIONS handler — catches preflight before routing
 @app.options("/{rest_of_path:path}")

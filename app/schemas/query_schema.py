@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Literal
 
 # User Query Schema
@@ -14,8 +14,8 @@ class Novel_Status(BaseModel):
 
 # Actual Query
 class UserQuery(BaseModel):
-    doc_id: str
-    query: str
+    doc_id: str = Field(..., min_length=1, max_length=100)
+    query: str = Field(..., min_length=1, max_length=2000)
 
 # Citations
 class Citations(BaseModel):

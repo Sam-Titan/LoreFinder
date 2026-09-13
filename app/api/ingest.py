@@ -1,16 +1,20 @@
 import uuid
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from app.schemas.ingest_schema import IngestNovelRequest, IngestStatusResponse
 from app.services.ingest_service import check_duplicate
 from app.db import firestore
 from app.tasks.ingestion import ingest_novel_task, ingest_pdf_task
 from app.core.config import settings
+from app.core.limiter import limiter
 
 router = APIRouter()
 
+_MAX_PDF_SIZE = 20 * 1024 * 1024  # 20MB
+
 @router.post("/novel", response_model=IngestStatusResponse)
-async def ingest_novel(payload: IngestNovelRequest):
+@limiter.limit("5/minute")
+async def ingest_novel(request: Request, payload: IngestNovelRequest):
     existing_doc_id = await check_duplicate(payload.novel_name, payload.author_name)
     if existing_doc_id:
         doc = firestore.get_document(existing_doc_id)
@@ -68,12 +72,19 @@ async def ingest_novel(payload: IngestNovelRequest):
     )
 
 @router.post("/pdf", response_model=IngestStatusResponse)
-async def ingest_pdf(file: UploadFile = File(...)):
+@limiter.limit("5/minute")
+async def ingest_pdf(request: Request, file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
+    # Never buffer more than the cap, regardless of how large the upload claims to be
+    file_bytes = await file.read(_MAX_PDF_SIZE + 1)
+    if len(file_bytes) > _MAX_PDF_SIZE:
+        raise HTTPException(status_code=413, detail="PDF exceeds the 20MB size limit.")
+    if not file_bytes.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="File does not appear to be a valid PDF.")
+
     session_id = f"session_{uuid.uuid4().hex[:10]}"
-    file_bytes = await file.read()
 
     # Enqueue background task — no Firestore write for PDFs
     ingest_pdf_task.delay(session_id, file_bytes)
