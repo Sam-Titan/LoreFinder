@@ -1,11 +1,16 @@
+import threading
+
 from sentence_transformers import CrossEncoder
 
 _model = None
+_model_lock = threading.Lock()
 
 def get_reranker() -> CrossEncoder:
     global _model
     if _model is None:
-        _model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        with _model_lock:
+            if _model is None:
+                _model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return _model
 
 def rerank(query: str, candidates: list[dict], top_k: int) -> list[dict]:

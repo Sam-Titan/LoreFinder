@@ -9,9 +9,14 @@ _indexes: dict[str, dict] = {}
 def _tokenize(text: str) -> list[str]:
     return re.findall(r"\w+", text.lower())
 
-def _build_chunk_index(doc_id: str) -> dict:
+def _build_chunk_index(doc_id: str) -> dict | None:
     collection = chroma.get_chunk_collection(doc_id)
     data = collection.get(include=["documents", "metadatas"])
+    if not data["documents"]:
+        # No chunks — e.g. an unknown/never-ingested doc_id (get_or_create_collection
+        # silently creates an empty one). BM25Okapi([]) raises ZeroDivisionError, so
+        # short-circuit instead: no chunks means no lexical matches, not an error.
+        return None
     tokenized = [_tokenize(doc) for doc in data["documents"]]
     return {
         "bm25": BM25Okapi(tokenized),
@@ -26,6 +31,8 @@ def search_chunks(doc_id: str, query: str, top_k: int) -> list[dict]:
     if doc_id not in _indexes:
         _indexes[doc_id] = _build_chunk_index(doc_id)
     idx = _indexes[doc_id]
+    if idx is None:
+        return []
 
     scores = idx["bm25"].get_scores(_tokenize(query))
     ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]

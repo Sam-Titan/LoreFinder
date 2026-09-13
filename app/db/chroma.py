@@ -1,17 +1,25 @@
+import threading
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 from app.core.config import settings
 from datetime import datetime, timezone
 
 _client = None
+_client_lock = threading.Lock()
 
 def get_client():
     global _client
+    # Now that query handling runs across executor threads (not just Celery's
+    # separate worker processes), the lazy check-then-create below is a real
+    # race: two threads can both see _client is None and both construct a
+    # PersistentClient concurrently, corrupting Chroma's Rust bindings state.
     if _client is None:
-        _client = chromadb.PersistentClient(
-            path=settings.CHROMA_PERSIST_PATH,
-            settings=ChromaSettings(anonymized_telemetry=False)
-        )
+        with _client_lock:
+            if _client is None:
+                _client = chromadb.PersistentClient(
+                    path=settings.CHROMA_PERSIST_PATH,
+                    settings=ChromaSettings(anonymized_telemetry=False)
+                )
     return _client
 
 def get_chunk_collection(doc_id: str):
