@@ -49,6 +49,7 @@ dist-ssr
 CLAUDE.md
 document_deletion.py
 chroma_store/
+PROJECT_NOTES.md
 
 # Editor directories and files
 .vscode/*
