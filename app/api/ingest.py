@@ -86,8 +86,9 @@ async def ingest_pdf(request: Request, file: UploadFile = File(...)):
 
     session_id = f"session_{uuid.uuid4().hex[:10]}"
 
-    # Enqueue background task — no Firestore write for PDFs
-    ingest_pdf_task.delay(session_id, file_bytes)
+    # Enqueue background task — no Firestore write for PDFs, so status is
+    # tracked via the Celery result backend using session_id as the task_id.
+    ingest_pdf_task.apply_async(args=[session_id, file_bytes], task_id=session_id)
 
     return IngestStatusResponse(
         doc_id=session_id,
@@ -97,6 +98,18 @@ async def ingest_pdf(request: Request, file: UploadFile = File(...)):
 
 @router.get("/status/{doc_id}", response_model=IngestStatusResponse)
 async def ingest_status(doc_id: str):
+    # PDF sessions have no Firestore doc (ephemeral, not persisted) — status
+    # comes from the Celery task result instead, keyed by session_id/task_id.
+    if doc_id.startswith("session_"):
+        result = ingest_pdf_task.AsyncResult(doc_id)
+        status = {"SUCCESS": "ready", "FAILURE": "failed"}.get(result.state, "processing")
+        message = {
+            "ready": "PDF is indexed and ready to query.",
+            "failed": "PDF ingestion failed. Please upload again.",
+            "processing": "PDF is being indexed."
+        }[status]
+        return IngestStatusResponse(doc_id=doc_id, status=status, message=message)
+
     doc = firestore.get_document(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found.")

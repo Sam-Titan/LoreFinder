@@ -1,5 +1,26 @@
 const BASE_URL = "http://127.0.0.1:8000";
 
+// FastAPI's `detail` is usually a string, but on a 422 it's an array of
+// Pydantic validation-error objects — normalize both shapes to one message
+// so the UI never renders "[object Object]".
+function errorMessage(err, fallback) {
+  const detail = err?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail) && detail.length) {
+    return detail.map(d => d.msg || JSON.stringify(d)).join("; ");
+  }
+  return fallback;
+}
+
+async function parseError(res, fallback) {
+  try {
+    const err = await res.json();
+    return errorMessage(err, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
 // --- Ingestion ---
 
 export async function ingestNovel(novelName, authorName) {
@@ -9,8 +30,7 @@ export async function ingestNovel(novelName, authorName) {
     body: JSON.stringify({ novel_name: novelName, author_name: authorName })
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || "Failed to start ingestion.");
+    throw new Error(await parseError(res, "Failed to start ingestion."));
   }
   return res.json();
 }
@@ -23,8 +43,7 @@ export async function ingestPDF(file) {
     body: formData
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || "Failed to upload PDF.");
+    throw new Error(await parseError(res, "Failed to upload PDF."));
   }
   return res.json();
 }
@@ -32,8 +51,7 @@ export async function ingestPDF(file) {
 export async function checkStatus(docId) {
   const res = await fetch(`${BASE_URL}/ingest/status/${docId}`);
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || "Failed to check status.");
+    throw new Error(await parseError(res, "Failed to check status."));
   }
   return res.json();
 }
@@ -47,8 +65,7 @@ export async function queryDocument(docId, query) {
     body: JSON.stringify({ doc_id: docId, query })
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || "Query failed.");
+    throw new Error(await parseError(res, "Query failed."));
   }
   return res.json();
 }

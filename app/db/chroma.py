@@ -71,6 +71,8 @@ def write_temp_embeddings(session_id: str, chunks: list[dict], vectors: list[lis
         documents=[c["chunk_text"] for c in chunks],
         metadatas=[{
             "session_id": session_id,
+            "chapter_number": c["chapter_number"],
+            "chapter_title": c.get("chapter_title") or "",
             "chunk_index": c["chunk_index"],
             "last_accessed": now   # set here, not from chunk
         } for c in chunks]

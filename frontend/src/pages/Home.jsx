@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ingestNovel, ingestPDF, addToHistory } from '../api/dawn'
+import LoadingSpinner from '../components/LoadingSpinner'
 
 export default function Home() {
   const [mode, setMode]       = useState('novel') // 'novel' | 'pdf'
@@ -156,36 +157,44 @@ export default function Home() {
           {mode === 'novel' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                <label htmlFor="novel-title" style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
                   Title
                 </label>
                 <input
+                  id="novel-title"
                   className="input"
                   placeholder="e.g. Frankenstein"
                   value={title}
+                  maxLength={200}
                   onChange={e => setTitle(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleNovelSubmit()}
                 />
               </div>
               <div>
-                <label style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                <label htmlFor="novel-author" style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
                   Author
                 </label>
                 <input
+                  id="novel-author"
                   className="input"
                   placeholder="e.g. Mary Shelley"
                   value={author}
+                  maxLength={200}
                   onChange={e => setAuthor(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleNovelSubmit()}
                 />
               </div>
-              {error && <p className="error-text">{error}</p>}
+              {error && <p className="error-text" role="alert">{error}</p>}
               <button
                 className="btn-primary"
                 onClick={handleNovelSubmit}
                 disabled={loading}
-                style={{ marginTop: '8px', width: '100%' }}
+                style={{
+                  marginTop: '8px', width: '100%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                }}
               >
+                {loading && <LoadingSpinner size={16} color="#fff" />}
                 {loading ? 'Searching…' : 'Find this novel'}
               </button>
               <p className="muted" style={{ textAlign: 'center' }}>
@@ -198,7 +207,16 @@ export default function Home() {
           {mode === 'pdf' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div
+                role="button"
+                tabIndex={0}
+                aria-label="Choose a PDF file to upload"
                 onClick={() => fileRef.current.click()}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    fileRef.current.click()
+                  }
+                }}
                 onDragOver={e => { e.preventDefault(); setDragging(true) }}
                 onDragLeave={() => setDragging(false)}
                 onDrop={handleDrop}
@@ -234,13 +252,17 @@ export default function Home() {
                   setError('')
                 }}
               />
-              {error && <p className="error-text">{error}</p>}
+              {error && <p className="error-text" role="alert">{error}</p>}
               <button
                 className="btn-primary"
                 onClick={handlePDFSubmit}
                 disabled={loading || !file}
-                style={{ width: '100%' }}
+                style={{
+                  width: '100%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                }}
               >
+                {loading && <LoadingSpinner size={16} color="#fff" />}
                 {loading ? 'Uploading…' : 'Upload and index'}
               </button>
               <p className="muted" style={{ textAlign: 'center' }}>

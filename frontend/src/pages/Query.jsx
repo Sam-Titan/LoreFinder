@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { queryDocument, getHistory } from '../api/dawn'
+import LoadingSpinner from '../components/LoadingSpinner'
 
 function CitationPill({ citation }) {
   return (
@@ -50,7 +51,8 @@ function Message({ role, text, citations, loading }) {
         padding: '16px 20px'
       }}>
         {loading ? (
-          <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+            <LoadingSpinner size={14} color="var(--amber)" />
             Reading the text…
           </span>
         ) : (
@@ -279,6 +281,7 @@ export default function Query() {
             placeholder="Ask anything about this novel…"
             value={input}
             rows={1}
+            maxLength={2000}
             onChange={e => {
               setInput(e.target.value)
               // Auto-grow
