@@ -1,4 +1,6 @@
-const BASE_URL = "http://127.0.0.1:8000";
+// VITE_API_URL lets a deployed build (e.g. on Netlify) point at a real
+// backend host; unset in local dev, it falls back to the local API.
+const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 // FastAPI's `detail` is usually a string, but on a 422 it's an array of
 // Pydantic validation-error objects — normalize both shapes to one message
