@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ingestNovel, ingestPDF, addToHistory } from '../api/dawn'
+import { ingestNovel, ingestPDF, addToHistory } from '../api/lorefinder'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 export default function Home() {
@@ -116,7 +116,7 @@ export default function Home() {
           lineHeight: 1.7
         }}>
           Find any public-domain novel or upload your own document.
-          Ask anything — Dawn reads it so you don't have to start over.
+          Ask anything — LoreFinder reads it so you don't have to start over.
         </p>
       </div>
 

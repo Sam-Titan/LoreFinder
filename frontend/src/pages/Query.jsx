@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { queryDocument, getHistory } from '../api/dawn'
+import { queryDocument, getHistory } from '../api/lorefinder'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 function CitationPill({ citation }) {
@@ -37,7 +37,7 @@ function Message({ role, text, citations, loading }) {
         marginBottom: '6px',
         textTransform: 'uppercase'
       }}>
-        {isUser ? 'You' : 'Dawn'}
+        {isUser ? 'You' : 'LoreFinder'}
       </span>
 
       {/* Bubble */}
@@ -107,19 +107,19 @@ export default function Query() {
     setInput('')
     setError('')
     setMessages(prev => [...prev, { role: 'user', text: q }])
-    setMessages(prev => [...prev, { role: 'dawn', text: '', citations: [], loading: true }])
+    setMessages(prev => [...prev, { role: 'assistant', text: '', citations: [], loading: true }])
     setLoading(true)
 
     try {
       const res = await queryDocument(docId, q)
         const responseText = res.response?.trim()
         ? res.response
-        : "Dawn couldn't find a relevant answer in this document. Try rephrasing or asking something more specific."
+        : "LoreFinder couldn't find a relevant answer in this document. Try rephrasing or asking something more specific."
 
         setMessages(prev => {
         const updated = [...prev]
         updated[updated.length - 1] = {
-            role: 'dawn',
+            role: 'assistant',
             text: responseText,
             citations: res.references || [],
             loading: false
@@ -130,7 +130,7 @@ export default function Query() {
       setMessages(prev => {
         const updated = [...prev]
         updated[updated.length - 1] = {
-          role: 'dawn',
+          role: 'assistant',
           text: e.message || 'Something went wrong. Please try again.',
           citations: [],
           loading: false,

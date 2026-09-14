@@ -83,7 +83,7 @@ export async function healthCheck() {
 
 export function getHistory() {
   try {
-    return JSON.parse(localStorage.getItem("dawn_history") || "[]");
+    return JSON.parse(localStorage.getItem("lorefinder_history") || "[]");
   } catch {
     return [];
   }
@@ -101,14 +101,14 @@ export function addToHistory({ doc_id, title, author, type, status }) {
   } else {
     history.unshift(entry);
   }
-  localStorage.setItem("dawn_history", JSON.stringify(history.slice(0, 20)));
+  localStorage.setItem("lorefinder_history", JSON.stringify(history.slice(0, 20)));
 }
 
 export function removeFromHistory(docId) {
   const updated = getHistory().filter(h => h.doc_id !== docId);
-  localStorage.setItem("dawn_history", JSON.stringify(updated));
+  localStorage.setItem("lorefinder_history", JSON.stringify(updated));
 }
 
 export function clearHistory() {
-  localStorage.removeItem("dawn_history");
+  localStorage.removeItem("lorefinder_history");
 }

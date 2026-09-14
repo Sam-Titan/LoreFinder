@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getHistory, removeFromHistory, clearHistory, checkStatus } from '../api/dawn'
+import { getHistory, removeFromHistory, clearHistory, checkStatus } from '../api/lorefinder'
 
 function HistoryCard({ entry, onRemove, onOpen }) {
   const date = new Date(entry.added_at).toLocaleDateString('en-US', {

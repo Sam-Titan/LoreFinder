@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { checkStatus } from '../api/dawn'
+import { checkStatus } from '../api/lorefinder'
 
 const PHASES = [
   { key: 'pending',    label: 'Queued',             desc: 'Waiting for a worker to pick up the task.' },

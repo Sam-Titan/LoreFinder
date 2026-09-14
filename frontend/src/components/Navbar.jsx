@@ -25,7 +25,7 @@ export default function Navbar() {
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent'
         }}>
-          Dawn
+          LoreFinder
         </span>
       </Link>
 
