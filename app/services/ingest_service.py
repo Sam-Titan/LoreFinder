@@ -9,9 +9,19 @@ async def check_duplicate(title: str, author: str) -> str | None:
     return firestore.check_exists(title, author)
 
 async def run_novel_ingestion(doc_id: str, title: str, author: str):
+    doc = firestore.get_document(doc_id)
+    phase = doc.get("phase", "start")
+
+    if phase == "complete":
+        # Already fully indexed. A caller can still land here on a stale
+        # re-submission (e.g. status got desynced from phase by an earlier
+        # failure and someone retried it) — nothing left to do, but make sure
+        # status reflects reality instead of getting stuck on whatever it was
+        # last reset to.
+        firestore.update_status(doc_id, "complete")
+        return
+
     try:
-        doc = firestore.get_document(doc_id)
-        phase = doc.get("phase", "start")
         embedder = get_embedder()
 
         if phase == "start":
@@ -125,12 +135,20 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
         if phase in ("summarization_complete", "chunks_complete"):
             firestore.update_field(doc_id, "phase", "complete")
             firestore.update_field(doc_id, "progress", "fully indexed")
+            firestore.update_status(doc_id, "complete")
 
     except ValueError as e:
         firestore.update_status(doc_id, "failed")
         raise
     except Exception as e:
-        firestore.update_status(doc_id, "failed")
+        # Only mark the whole document "failed" if we hadn't even gotten
+        # chunks written yet (phase is still "start" at the point of failure).
+        # A failure during background summarization happens after chunks are
+        # already indexed and queryable — downgrading status to "failed" here
+        # would hide an otherwise-usable document instead of just leaving
+        # summarization to retry.
+        if phase == "start":
+            firestore.update_status(doc_id, "failed")
         raise e
     
 async def run_pdf_ingestion(session_id: str, file_bytes: bytes):

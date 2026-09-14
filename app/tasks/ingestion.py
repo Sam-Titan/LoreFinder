@@ -29,7 +29,12 @@ def ingest_novel_task(self, doc_id: str, title: str, author: str):
         if self.request.retries >= self.max_retries:
             print(f"Giving up on {title} after {self.request.retries + 1} attempts: {e}")
             from app.db import firestore
-            firestore.update_status(doc_id, "failed")
+            doc = firestore.get_document(doc_id)
+            # Only mark it "failed" if chunks were never made ready — if this
+            # was a background-summarization failure, the document is still
+            # fully usable for narrow queries and shouldn't be hidden.
+            if not doc or doc.get("phase", "start") == "start":
+                firestore.update_status(doc_id, "failed")
             return
         raise self.retry(exc=e, countdown=30)
     

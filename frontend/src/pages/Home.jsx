@@ -30,7 +30,7 @@ export default function Home() {
         type: 'novel',
         status: res.status
       })
-      if (res.status === 'ready') {
+      if (res.status === 'ready' || res.status === 'complete') {
         navigate(`/query/${res.doc_id}`)
       } else {
         navigate(`/status/${res.doc_id}`)
