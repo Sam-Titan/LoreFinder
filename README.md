@@ -80,7 +80,7 @@ uvicorn app.main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
-The frontend's API client (`frontend/src/api/dawn.js`) points at
+The frontend's API client (`frontend/src/api/lorefinder.js`) points at
 `http://127.0.0.1:8000` by default; set `VITE_API_URL` to override it (e.g.
 for a deployed backend).
 
