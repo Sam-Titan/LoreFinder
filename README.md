@@ -66,7 +66,23 @@ session TTL, etc.) live in `app/core/config.py` with sane defaults.
 
 ### Run it
 
+The app's own code has no OS-specific logic — FastAPI, PyMuPDF,
+sentence-transformers, ChromaDB, and the frontend all run natively on either
+platform. The only real friction is **Celery and Redis**, neither of which
+officially supports native Windows: Celery's default worker pool relies on
+`os.fork()` (Unix-only), and Redis ships no official Windows build. Pick
+whichever path below matches your setup.
+
+#### Linux / WSL2
+
+This is the environment the project is developed and tested in day to day —
+everything works exactly as documented, no workarounds needed.
+
 ```bash
+# Redis (if not already running)
+sudo apt install redis-server && sudo service redis-server start
+# or: run it via Docker — docker run -d -p 6379:6379 redis
+
 # Backend deps
 ./venv/bin/pip install -r requirements.txt
 
@@ -80,21 +96,56 @@ uvicorn app.main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
+#### Windows (native)
+
+Runs fine, with two adjustments: venv scripts live under `venv\Scripts\`
+instead of `venv/bin/`, and the Celery worker needs `--pool=solo` (or
+`--pool=threads`) since the default prefork pool won't start on Windows.
+
+```powershell
+# Redis has no official Windows build. Easiest options, in order of effort:
+#   1. Run Redis inside WSL2 (see the Linux commands above) and point
+#      REDIS_URL/CELERY_BROKER_URL at it — WSL2 services are reachable from
+#      Windows at localhost by default.
+#   2. Run it via Docker Desktop: docker run -d -p 6379:6379 redis
+#   3. Install a third-party Windows build, e.g. Memurai.
+
+# Backend deps
+venv\Scripts\pip.exe install -r requirements.txt
+
+# Terminal 1 — API
+venv\Scripts\python.exe -m uvicorn app.main:app --reload
+
+# Terminal 2 — Celery worker (+ beat) — note --pool=solo
+venv\Scripts\celery.exe -A app.tasks.ingestion.celery_app worker --pool=solo --beat --loglevel=info
+
+# Terminal 3 — frontend (identical to Linux/WSL2 — Node has no OS split here)
+cd frontend
+npm install
+npm run dev
+```
+
+`--pool=solo` processes ingestion tasks one at a time instead of in parallel
+worker processes — fine for local dev, but if you outgrow it, WSL2 (running
+the exact Linux commands above) is the path of least resistance rather than
+fighting Celery's Windows support further.
+
 The frontend's API client (`frontend/src/api/lorefinder.js`) points at
 `http://127.0.0.1:8000` by default; set `VITE_API_URL` to override it (e.g.
 for a deployed backend).
 
 `GET /health` reports API, Redis, and Celery worker status — useful for
-confirming everything above is actually up.
+confirming everything above is actually up, on either platform.
 
 ### Linting
 
 ```bash
-# Frontend
+# Frontend (same on every platform)
 cd frontend && npm run lint      # oxlint
 
-# Backend
-./venv/bin/ruff check .          # not yet clean against existing code
+# Backend — not yet clean against existing code
+./venv/bin/ruff check .          # Linux/WSL2
+venv\Scripts\ruff.exe check .    # Windows
 ```
 
 ## Testing
@@ -108,7 +159,8 @@ previous runs (delete `chroma_store/` and run `document_deletion.py`) so
 stale vectors don't make results ambiguous.
 
 ```bash
-./venv/bin/pytest -m smoke
+./venv/bin/pytest -m smoke      # Linux/WSL2
+venv\Scripts\pytest.exe -m smoke  # Windows
 ```
 
 ## Deploying (Render + Netlify)
