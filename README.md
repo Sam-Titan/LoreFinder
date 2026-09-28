@@ -83,8 +83,8 @@ everything works exactly as documented, no workarounds needed.
 sudo apt install redis-server && sudo service redis-server start
 # or: run it via Docker — docker run -d -p 6379:6379 redis
 
-# Backend deps
-./venv/bin/pip install -r requirements.txt
+# Backend deps (requirements-dev.txt = requirements.txt + pytest/ruff for local dev)
+./venv/bin/pip install -r requirements-dev.txt
 
 # Terminal 1 — API
 uvicorn app.main:app --reload
@@ -110,8 +110,8 @@ instead of `venv/bin/`, and the Celery worker needs `--pool=solo` (or
 #   2. Run it via Docker Desktop: docker run -d -p 6379:6379 redis
 #   3. Install a third-party Windows build, e.g. Memurai.
 
-# Backend deps
-venv\Scripts\pip.exe install -r requirements.txt
+# Backend deps (requirements-dev.txt = requirements.txt + pytest/ruff for local dev)
+venv\Scripts\pip.exe install -r requirements-dev.txt
 
 # Terminal 1 — API
 venv\Scripts\python.exe -m uvicorn app.main:app --reload

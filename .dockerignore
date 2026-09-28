@@ -1,0 +1,18 @@
+# The frontend deploys separately to Netlify — not part of this image.
+frontend/
+
+# Local/dev-only, never needed inside the container.
+venv/
+.venv/
+chroma_store/
+tests/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.git/
+.env
+firebase_credentials.json
+CLAUDE.md
+PROJECT_NOTES.md
+*.docx

@@ -1,0 +1,6 @@
+# Local development only — the Docker image installs requirements.txt alone,
+# so these never ship in the deployed backend.
+-r requirements.txt
+
+pytest==9.1.1
+ruff==0.16.7
