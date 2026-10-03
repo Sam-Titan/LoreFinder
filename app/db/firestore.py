@@ -72,6 +72,16 @@ def get_chapters(doc_id: str) -> list[dict]:
     )
     return [doc.to_dict() for doc in docs]
 
+def get_all_chunks(doc_id: str) -> list[dict]:
+    db = get_client()
+    docs = (
+        db.collection("documents")
+        .document(doc_id)
+        .collection("chunks")
+        .stream()
+    )
+    return [doc.to_dict() for doc in docs]
+
 def get_chunks_by_ids(doc_id: str, chunk_ids: list[str]) -> list[dict]:
     db = get_client()
     # TODO: batch if > 30

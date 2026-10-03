@@ -50,6 +50,7 @@ CLAUDE.md
 document_deletion.py
 chroma_store/
 PROJECT_NOTES.md
+.claude/settings.local.json
 
 # Editor directories and files
 .vscode/*

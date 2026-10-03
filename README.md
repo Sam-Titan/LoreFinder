@@ -50,6 +50,7 @@ Celery task pick up where it left off instead of restarting from scratch.
 - Python 3.11+ and Node 18+
 - Redis running locally (`redis://localhost:6379` by default)
 - A Firebase/GCP service-account key for Firestore
+- A [Chroma Cloud](https://www.trychroma.com/pricing) account + API key (vector storage — see [Design notes](#design-notes) for why this isn't local disk)
 
 ### Environment variables
 
@@ -59,10 +60,11 @@ Create a `.env` at the repo root (no `.env.example` is checked in):
 GROQ_API_KEY=...
 GEMINI_API_KEY=...
 FIREBASE_CREDENTIALS_PATH=./firebase_credentials.json
+CHROMA_API_KEY=...
 ```
 
-Other tunables (chunk size/overlap, embedding model, Chroma persist path,
-session TTL, etc.) live in `app/core/config.py` with sane defaults.
+Other tunables (chunk size/overlap, embedding model, session TTL, etc.) live
+in `app/core/config.py` with sane defaults.
 
 ### Run it
 
@@ -155,8 +157,9 @@ backend (`DAWN_API_BASE_URL`, defaults to `http://127.0.0.1:8000`) — it skips
 automatically if the backend isn't reachable. Markers: `smoke` (fast narrow
 queries), `full` (broad queries needing chapter summarization), `slow`
 (100+ chapter novels). Before a fresh test run, clear out data left over from
-previous runs (delete `chroma_store/` and run `document_deletion.py`) so
-stale vectors don't make results ambiguous.
+previous runs — run `document_deletion.py` for Firestore, and delete any
+stale collections from the Chroma Cloud dashboard — so stale vectors don't
+make results ambiguous.
 
 ```bash
 ./venv/bin/pytest -m smoke      # Linux/WSL2
@@ -172,15 +175,16 @@ venv\Scripts\pytest.exe -m smoke  # Windows
 - **Backend → Render:** provision a managed Redis instance for
   `CELERY_BROKER_URL`/`REDIS_URL`; upload the Firebase credentials JSON via
   Render's Secret Files and point `FIREBASE_CREDENTIALS_PATH` at the mounted
-  path; start command needs `--host 0.0.0.0 --port $PORT` (Render assigns the
-  port dynamically).
-- **Persistent storage gotcha:** Render disks are ephemeral unless you attach
-  a paid Persistent Disk, and a disk attaches to exactly one service. Since
-  both the API (queries) and the Celery worker (ingestion) read/write the
-  same local `chroma_store/`, run them as **one** Render service (a single
-  start script backgrounding the Celery worker + beat, then running uvicorn
-  in the foreground) sharing one Persistent Disk — splitting them into
-  separate services would give each an unsynced copy of the vector store.
+  path; set `CHROMA_API_KEY` as a plain env var; start command needs
+  `--host 0.0.0.0 --port $PORT` (Render assigns the port dynamically).
+- **No Persistent Disk needed.** Vector storage lives in Chroma Cloud, not
+  local disk, so Render's free-tier ephemeral filesystem (wiped on every
+  redeploy or idle spin-down) is a non-issue for it — see
+  [Design notes](#design-notes). `Dockerfile`/`start.sh` still run uvicorn and
+  the Celery worker/beat as one container; that's no longer *required* by a
+  shared-disk constraint the way it was with local Chroma, but splitting them
+  into separate Render services hasn't been built out, so this remains the
+  supported setup unless you change it yourself.
 
 ## Design notes
 
@@ -194,3 +198,11 @@ venv\Scripts\pytest.exe -m smoke  # Windows
 - **`document_deletion.py`** is a standalone, manually-run maintenance script
   that wipes the entire Firestore `documents` collection. It is not wired
   into the API — don't run it outside of deliberate maintenance/test cleanup.
+- **Chroma Cloud, not local disk.** Vector storage uses Chroma's hosted
+  service (`CHROMA_API_KEY`) rather than `chromadb.PersistentClient`, so it's
+  unaffected by Render's ephemeral filesystem. `ingest_service.rebuild_chroma_if_missing`
+  (triggered from `query_service.py` when a novel query comes back with
+  zero candidates) still exists as a defensive fallback — it re-embeds
+  chunk/chapter text already stored in Firestore if Chroma's copy is ever
+  found missing for any reason — but it's no longer the normal-case path the
+  way it was when storage reset on every container restart.

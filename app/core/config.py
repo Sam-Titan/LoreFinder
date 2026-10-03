@@ -1,11 +1,6 @@
 from pydantic_settings import BaseSettings
-import os
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class Settings(BaseSettings):
-    CHROMA_PERSIST_PATH: str = os.path.join(BASE_DIR, "chroma_store")
-
     # LLMs
     GROQ_API_KEY: str
     GEMINI_API_KEY: str
@@ -13,8 +8,12 @@ class Settings(BaseSettings):
     # Firebase
     FIREBASE_CREDENTIALS_PATH: str
 
-    # Chroma
-    CHROMA_PERSIST_PATH: str = "./chroma_store"
+    # Chroma Cloud — tenant/database aren't always inferable from the API key
+    # alone (this account's key needs both given explicitly, confirmed by a
+    # live ChromaAuthError otherwise), so all three are required.
+    CHROMA_API_KEY: str
+    CHROMA_TENANT: str
+    CHROMA_DATABASE: str
 
     # Embedding
     EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"

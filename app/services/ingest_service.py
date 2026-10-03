@@ -1,12 +1,45 @@
 from datetime import datetime, timezone
 from app.db import firestore, chroma
-from app.services import acquisition, parser, chunker, summarizer
+from app.services import acquisition, parser, chunker, summarizer, bm25_index
 from app.services.embedder import get_embedder
 
 MAX_SUMMARY_CHAPTERS = 100
 
 async def check_duplicate(title: str, author: str) -> str | None:
     return firestore.check_exists(title, author)
+
+def rebuild_chroma_if_missing(doc_id: str) -> bool:
+    # On a host with no durable disk (e.g. Render's free tier), Chroma's
+    # local storage can reset independently of Firestore, which is a
+    # separate managed service and always survives. A "complete" document
+    # whose chunk collection comes back empty isn't a genuine content gap —
+    # get_or_create_collection just silently made a fresh, empty one. The
+    # chunk text and chapter summaries are still safe in Firestore, so
+    # rebuild the vector index from there instead of treating it as broken.
+    # Only the (fast, local) embedding step needs to re-run — acquisition,
+    # parsing, chunking, and LLM summarization are all skipped entirely.
+    doc = firestore.get_document(doc_id)
+    if not doc or doc.get("status") not in ("ready", "complete"):
+        return False
+
+    if chroma.get_chunk_collection(doc_id).count() > 0:
+        return False
+
+    chunks = firestore.get_all_chunks(doc_id)
+    if not chunks:
+        return False
+
+    embedder = get_embedder()
+    chunk_vectors = embedder.embed([c["chunk_text"] for c in chunks])
+    chroma.write_chunk_embeddings(doc_id, chunks, chunk_vectors)
+
+    chapters = [ch for ch in firestore.get_chapters(doc_id) if ch.get("summary")]
+    if chapters:
+        chapter_vectors = embedder.embed([ch["summary"] for ch in chapters])
+        chroma.write_chapter_embeddings(doc_id, chapters, chapter_vectors)
+
+    bm25_index.invalidate(doc_id)
+    return True
 
 async def run_novel_ingestion(doc_id: str, title: str, author: str):
     doc = firestore.get_document(doc_id)

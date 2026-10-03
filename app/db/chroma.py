@@ -12,15 +12,29 @@ def get_client():
     # Now that query handling runs across executor threads (not just Celery's
     # separate worker processes), the lazy check-then-create below is a real
     # race: two threads can both see _client is None and both construct a
-    # PersistentClient concurrently, corrupting Chroma's Rust bindings state.
+    # client concurrently, corrupting Chroma's Rust bindings state.
     if _client is None:
         with _client_lock:
             if _client is None:
-                _client = chromadb.PersistentClient(
-                    path=settings.CHROMA_PERSIST_PATH,
+                # Chroma Cloud — a real managed service, not local disk, so
+                # data survives container restarts/redeploys on its own.
+                _client = chromadb.CloudClient(
+                    api_key=settings.CHROMA_API_KEY,
+                    tenant=settings.CHROMA_TENANT,
+                    database=settings.CHROMA_DATABASE,
                     settings=ChromaSettings(anonymized_telemetry=False)
                 )
     return _client
+
+def reset_client() -> None:
+    # Drop the cached client so the next get_client() call builds a fresh
+    # one. Kept as a defensive measure for any transient client-level fault
+    # (e.g. a stale connection after a network blip) — less likely to matter
+    # now that storage itself lives in Chroma Cloud rather than local disk,
+    # but harmless to keep as a fallback.
+    global _client
+    with _client_lock:
+        _client = None
 
 def get_chunk_collection(doc_id: str):
     return get_client().get_or_create_collection(f"{doc_id}_chunks")
