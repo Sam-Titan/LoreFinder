@@ -20,6 +20,69 @@ function CitationPill({ citation }) {
   )
 }
 
+// Renders the handful of markdown patterns the model actually produces
+// (bold, bullet lists) as real elements instead of literal ** and - marks.
+// Deliberately not a general markdown renderer and never uses
+// dangerouslySetInnerHTML — every text fragment still goes through React's
+// normal escaping, so this can't become an XSS vector for LLM-generated text.
+function renderInline(line, keyPrefix) {
+  return line.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
+    if (part.length > 4 && part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${keyPrefix}-${i}`}>{part.slice(2, -2)}</strong>
+    }
+    return part ? <span key={`${keyPrefix}-${i}`}>{part}</span> : null
+  })
+}
+
+// Groups consecutive bullet lines into a <ul>, and consecutive non-bullet
+// lines into a <p> — rather than requiring an entire double-newline block to
+// be uniformly one or the other, since the model often runs a lead-in
+// sentence straight into a bullet list with only a single newline between
+// them (no blank-line separator).
+function renderFormattedText(text) {
+  const blocks = text.trim().split(/\n{2,}/)
+  const elements = []
+  let key = 0
+
+  for (const block of blocks) {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean)
+    let i = 0
+    while (i < lines.length) {
+      const isBullet = /^[-*]\s+/.test(lines[i])
+      const run = []
+      while (i < lines.length && /^[-*]\s+/.test(lines[i]) === isBullet) {
+        run.push(lines[i])
+        i++
+      }
+      if (isBullet) {
+        elements.push(
+          <ul key={key} style={{ margin: '4px 0 12px', paddingLeft: '20px' }}>
+            {run.map((line, li) => (
+              <li key={li} style={{ marginBottom: '4px' }}>
+                {renderInline(line.replace(/^[-*]\s+/, ''), `${key}-${li}`)}
+              </li>
+            ))}
+          </ul>
+        )
+      } else {
+        elements.push(
+          <p key={key} style={{ marginBottom: '12px' }}>
+            {run.map((line, li) => (
+              <span key={li}>
+                {li > 0 && <br />}
+                {renderInline(line, `${key}-${li}`)}
+              </span>
+            ))}
+          </p>
+        )
+      }
+      key++
+    }
+  }
+
+  return elements
+}
+
 function Message({ role, text, citations, loading }) {
   const isUser = role === 'user'
 
@@ -56,12 +119,12 @@ function Message({ role, text, citations, loading }) {
             Reading the text…
           </span>
         ) : (
-          <p style={{
+          <div style={{
             color: 'var(--text-primary)', fontSize: '15px',
-            lineHeight: 1.7, whiteSpace: 'pre-wrap'
+            lineHeight: 1.7
           }}>
-            {text}
-          </p>
+            {renderFormattedText(text)}
+          </div>
         )}
       </div>
 
@@ -316,7 +379,7 @@ export default function Query() {
         <p className="muted" style={{
           textAlign: 'center', fontSize: '12px', marginTop: '8px'
         }}>
-          Press Enter to send · Shift+Enter for new line
+          Press Enter to send · Shift+Enter for new line · Made by Swayam Bansal
         </p>
       </div>
     </div>

@@ -25,7 +25,14 @@ def _build_chunk_index(doc_id: str) -> dict | None:
         "metadatas": data["metadatas"],
     }
 
-def search_chunks(doc_id: str, query: str, top_k: int) -> list[dict]:
+def invalidate(doc_id: str) -> None:
+    # Drop a cached index (possibly built as empty, e.g. against a Chroma
+    # collection that was later repopulated) so the next search rebuilds it.
+    _indexes.pop(doc_id, None)
+
+def search_chunks(
+    doc_id: str, query: str, top_k: int, chapter_numbers: list[int] = None
+) -> list[dict]:
     # Built once per process and reused — a doc's chunks never change after ingestion,
     # so no cache invalidation is needed for the lifetime of a worker/uvicorn process.
     if doc_id not in _indexes:
@@ -35,7 +42,14 @@ def search_chunks(doc_id: str, query: str, top_k: int) -> list[dict]:
         return []
 
     scores = idx["bm25"].get_scores(_tokenize(query))
-    ranked = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
+    candidate_indices = range(len(scores))
+    if chapter_numbers:
+        chapter_set = set(chapter_numbers)
+        candidate_indices = [
+            i for i in candidate_indices
+            if idx["metadatas"][i].get("chapter_number") in chapter_set
+        ]
+    ranked = sorted(candidate_indices, key=lambda i: scores[i], reverse=True)[:top_k]
 
     return [
         {

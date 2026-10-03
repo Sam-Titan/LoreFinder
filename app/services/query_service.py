@@ -1,12 +1,13 @@
 import asyncio
 import functools
 import os
+import re
 from langchain_groq import ChatGroq
 from app.core.config import settings
 from app.schemas.query_schema import Category
 from app.services.embedder import get_embedder
-from app.services import retriever, reranker, bm25_index
-from app.db import firestore
+from app.services import retriever, reranker, bm25_index, ingest_service
+from app.db import firestore, chroma
 import time
 
 os.environ["GROQ_API_KEY"] = settings.GROQ_API_KEY
@@ -29,6 +30,44 @@ _NARROW_KEYWORDS = {
     "who", "what is", "when", "where", "which", "name", "how many",
     "what color", "what did", "exact", "specifically", "chapter", "quote"
 }
+
+# Vector/BM25 search over chunk or chapter-summary *content* has no way to
+# answer a positional reference like "the opening chapter" or "chapter 5" —
+# embedding similarity matches semantic content, not ordinal position, so a
+# query like "Describe the opening chapter" was retrieving whatever chunks
+# happened to score highest by coincidence, never actually chapter 1.
+# Detecting these explicitly and restricting retrieval to the real chapter
+# number sidesteps the problem entirely instead of relying on search to find
+# something it structurally can't.
+_FIRST_CHAPTER_RE = re.compile(r"\b(opening|first|beginning|starting)\s+chapter\b|\bchapter\s+(one|1st)\b")
+_LAST_CHAPTER_RE = re.compile(r"\b(last|final|closing|ending)\s+chapter\b")
+_NUMBERED_CHAPTER_RE = re.compile(r"\bchapter\s+(\d+)\b")
+_ORDINAL_CHAPTER_WORDS = {
+    # Ordinals ("the third chapter") and cardinals ("chapter three") both
+    # occur naturally, just in opposite word order relative to "chapter" —
+    # _detect_explicit_chapter checks both orders for every word here.
+    "second": 2, "two": 2, "third": 3, "three": 3, "fourth": 4, "four": 4,
+    "fifth": 5, "five": 5, "sixth": 6, "six": 6, "seventh": 7, "seven": 7,
+    "eighth": 8, "eight": 8, "ninth": 9, "nine": 9, "tenth": 10, "ten": 10,
+}
+
+def _detect_explicit_chapter(query: str) -> int | None:
+    q = query.lower()
+    if _FIRST_CHAPTER_RE.search(q):
+        return 1
+    match = _NUMBERED_CHAPTER_RE.search(q)
+    if match:
+        return int(match.group(1))
+    for word, number in _ORDINAL_CHAPTER_WORDS.items():
+        # Natural English puts the ordinal before the noun ("the third
+        # chapter") but the cardinal after it ("chapter three") — check both
+        # orders rather than assuming one.
+        if re.search(rf"\b{word}\s+chapter\b", q) or re.search(rf"\bchapter\s+{word}\b", q):
+            return number
+    return None
+
+def _is_last_chapter_reference(query: str) -> bool:
+    return bool(_LAST_CHAPTER_RE.search(query.lower()))
 
 def classify_query_intent(query: str) -> Category:
     q_lower = query.lower()
@@ -167,28 +206,81 @@ async def run_query_pipeline(doc_id: str, query: str) -> dict:
     # Route based on doc type and category
     is_pdf = doc_id.startswith("session_")
 
-    if is_pdf:
-        candidates = await run(retriever.retrieve_temp, doc_id, query_vectors, top_k=_CANDIDATE_K)
-    elif category and category.category == "broad":
-        doc = await run(firestore.get_document, doc_id)
-        if doc.get("progress") == "chunks ready, chapter summarization in progress":
-            raise ValueError("Chapter summaries are still being processed. Please try a narrow query or wait until fully indexed.")
-        chapters = await run(firestore.get_chapters, doc_id)
-        all_chapter_numbers = [ch["chapter_number"] for ch in chapters]
-        vector_candidates, lexical_candidates = await asyncio.gather(
-            run(
-                retriever.retrieve_broad, doc_id, query_vectors,
-                all_chapter_numbers, top_k=_CANDIDATE_K
-            ),
-            run(bm25_index.search_chunks, doc_id, query, top_k=_BM25_K)
-        )
-        candidates = _union_by_id(vector_candidates, lexical_candidates)
-    else:
-        vector_candidates, lexical_candidates = await asyncio.gather(
-            run(retriever.retrieve_narrow, doc_id, query_vectors, top_k=_CANDIDATE_K),
-            run(bm25_index.search_chunks, doc_id, query, top_k=_BM25_K)
-        )
-        candidates = _union_by_id(vector_candidates, lexical_candidates)
+    async def do_retrieval():
+        try:
+            if is_pdf:
+                return await run(retriever.retrieve_temp, doc_id, query_vectors, top_k=_CANDIDATE_K)
+            elif category and category.category == "broad":
+                doc = await run(firestore.get_document, doc_id)
+                if doc.get("progress") == "chunks ready, chapter summarization in progress":
+                    raise ValueError("Chapter summaries are still being processed. Please try a narrow query or wait until fully indexed.")
+
+                chapter_ref = _detect_explicit_chapter(query)
+                if chapter_ref is None and _is_last_chapter_reference(query):
+                    chapter_ref = doc.get("chapter_count")
+
+                if chapter_ref:
+                    # A specific chapter was named directly — chapter-summary
+                    # matching has the same ordinal-blindness problem as plain
+                    # chunk search, so skip straight to that chapter's chunks
+                    # instead of trying to "find" it semantically.
+                    vector_candidates, lexical_candidates = await asyncio.gather(
+                        run(retriever.retrieve_narrow, doc_id, query_vectors, top_k=_CANDIDATE_K, chapter_numbers=[chapter_ref]),
+                        run(bm25_index.search_chunks, doc_id, query, top_k=_BM25_K, chapter_numbers=[chapter_ref])
+                    )
+                    return _union_by_id(vector_candidates, lexical_candidates)
+
+                chapters = await run(firestore.get_chapters, doc_id)
+                all_chapter_numbers = [ch["chapter_number"] for ch in chapters]
+                vector_candidates, lexical_candidates = await asyncio.gather(
+                    run(
+                        retriever.retrieve_broad, doc_id, query_vectors,
+                        all_chapter_numbers, top_k=_CANDIDATE_K
+                    ),
+                    run(bm25_index.search_chunks, doc_id, query, top_k=_BM25_K)
+                )
+                return _union_by_id(vector_candidates, lexical_candidates)
+            else:
+                chapter_ref = _detect_explicit_chapter(query)
+                if chapter_ref is None and _is_last_chapter_reference(query):
+                    doc = await run(firestore.get_document, doc_id)
+                    chapter_ref = doc.get("chapter_count") if doc else None
+
+                vector_candidates, lexical_candidates = await asyncio.gather(
+                    run(retriever.retrieve_narrow, doc_id, query_vectors, top_k=_CANDIDATE_K,
+                        chapter_numbers=[chapter_ref] if chapter_ref else None),
+                    run(bm25_index.search_chunks, doc_id, query, top_k=_BM25_K,
+                        chapter_numbers=[chapter_ref] if chapter_ref else None)
+                )
+                return _union_by_id(vector_candidates, lexical_candidates)
+        except ValueError:
+            raise  # a real, expected error (e.g. summaries still in progress) — not a storage fault
+        except Exception as e:
+            # A Chroma client left over from before local storage was wiped
+            # out from under an already-running process (rather than a real
+            # restart) can throw here instead of just returning empty
+            # results — e.g. "attempt to write a readonly database". Reset
+            # the cached client so the next attempt gets a fresh one, and
+            # treat this the same as "no data yet" so the rebuild-from-
+            # Firestore path below gets a chance to run instead of the
+            # whole query failing outright.
+            print(f"Retrieval failed for doc_id={doc_id!r}, resetting Chroma client: {e}")
+            chroma.reset_client()
+            return []
+
+    candidates = await do_retrieval()
+
+    if not candidates and not is_pdf:
+        # Almost certainly not a genuine "nothing relevant" miss — Chroma's
+        # top-k search returns its nearest neighbors regardless of match
+        # quality whenever the collection actually has data, so empty
+        # candidates for an indexed novel usually means the vector index
+        # itself is empty (e.g. wiped by a host restart on a non-persistent
+        # disk). Firestore is a separate, durable store that still has the
+        # chunk text, so try rebuilding from it before giving up.
+        rebuilt = await run(ingest_service.rebuild_chroma_if_missing, doc_id)
+        if rebuilt:
+            candidates = await do_retrieval()
 
     if not candidates:
         raise ValueError("No relevant content found for this query.")

@@ -9,7 +9,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <Navbar />
-      <main style={{ minHeight: '100vh' }}>
+      <main style={{ minHeight: 'calc(100vh - 60px)' }}>
         <Routes>
           <Route path="/"                  element={<Home />} />
           <Route path="/status/:docId"     element={<Status />} />

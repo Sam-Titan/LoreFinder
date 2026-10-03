@@ -37,12 +37,14 @@ def expand_chapter_margin(
 def retrieve_narrow(
     doc_id: str,
     query_vectors: list[list[float]],
-    top_k: int = 5
+    top_k: int = 5,
+    chapter_numbers: list[int] = None
 ) -> list[dict]:
     results_lists = chroma.search_chunks(
         doc_id=doc_id,
         query_vectors=query_vectors,
-        top_k=top_k
+        top_k=top_k,
+        chapter_numbers=chapter_numbers
     )
     return _merge_dedupe(results_lists, top_k)
 
