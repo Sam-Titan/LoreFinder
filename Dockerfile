@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
-# Runs the FastAPI API and the Celery worker/beat as one container/service —
-# they need to share the same local chroma_store/ (see README's "Deploying"
-# section), and a Render Persistent Disk can only attach to one service.
+# One image, two possible Render services: start-web.sh (API only) and
+# start-worker.sh (Celery worker/beat only), run as separate services so
+# ingestion's memory use never competes with API serving on a small plan —
+# see README's "Deploying" section. start.sh (both in one container) is kept
+# for local dev convenience only; Render should not use it.
 FROM python:3.14-slim
 
 WORKDIR /app
@@ -25,7 +27,7 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
 COPY . .
-RUN chmod +x start.sh
+RUN chmod +x start.sh start-web.sh start-worker.sh
 
 # Documents the default for local `docker run`; Render overrides this with
 # its own dynamically-assigned $PORT at runtime regardless (see start.sh).

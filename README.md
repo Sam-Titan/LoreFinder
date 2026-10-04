@@ -181,22 +181,32 @@ venv\Scripts\pytest.exe -m smoke  # Windows
   `npm run build`, publish directory `dist`. Set `VITE_API_URL` to your
   Render backend's URL. `frontend/public/_redirects` already handles SPA
   routing so client-side routes don't 404 on refresh.
-- **Backend → Render:** provision a managed Redis instance for
-  `CELERY_BROKER_URL`/`REDIS_URL`; upload the Firebase credentials JSON via
-  Render's Secret Files and point `FIREBASE_CREDENTIALS_PATH` at the mounted
-  path; set `CHROMA_API_KEY` and `JINA_API_KEY` as plain env vars; start
-  command needs `--host 0.0.0.0 --port $PORT` (Render assigns the port
-  dynamically). With no local embedding/reranking model to load, the backend
-  idles around 400-500MB — fits Render's $7/mo Starter plan (512MB), not just
-  the $25/mo Standard tier.
+- **Backend → Render, as two separate services sharing one image.** Running
+  the API and the Celery worker in one container (`start.sh`) means both
+  share one memory budget — confirmed live that real ingestion work (agent +
+  parsing/chunking + Jina/Chroma/Firestore calls) can get the worker silently
+  OOM-killed by the kernel on a 512MB plan while uvicorn stays up, leaving
+  ingestion stuck on "processing" forever with no further error. Deploy as:
+  - **Web Service** — build from the repo's `Dockerfile`, start command
+    `sh start-web.sh` (uvicorn only, no Celery).
+  - **Background Worker** — same repo/Dockerfile, start command
+    `sh start-worker.sh` (Celery worker + beat only, no uvicorn).
+
+  Both need the same env vars: `GROQ_API_KEY`, `GEMINI_API_KEY`,
+  `FIREBASE_CREDENTIALS_PATH` (+ the credentials JSON via Render's Secret
+  Files on both services), `CHROMA_API_KEY`, `CHROMA_TENANT`,
+  `CHROMA_DATABASE`, `JINA_API_KEY`, and a shared `CELERY_BROKER_URL`/
+  `REDIS_URL` (a managed Redis instance both services point at). Only the
+  Web Service needs `--host 0.0.0.0 --port $PORT` (handled by `start-web.sh`
+  already). With no local embedding/reranking model and the two roles split,
+  each service idles around 230-250MB and peaks well under 512MB even during
+  a long novel's ingestion — fits the $7/mo Starter plan per service.
+  `start.sh` (both roles combined) still exists for local dev convenience
+  only — don't use it on Render.
 - **No Persistent Disk needed.** Vector storage lives in Chroma Cloud, not
   local disk, so Render's free-tier ephemeral filesystem (wiped on every
   redeploy or idle spin-down) is a non-issue for it — see
-  [Design notes](#design-notes). `Dockerfile`/`start.sh` still run uvicorn and
-  the Celery worker/beat as one container; that's no longer *required* by a
-  shared-disk constraint the way it was with local Chroma, but splitting them
-  into separate Render services hasn't been built out, so this remains the
-  supported setup unless you change it yourself.
+  [Design notes](#design-notes).
 
 ## Design notes
 
