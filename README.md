@@ -16,8 +16,8 @@ The app is intentionally open with no accounts or sign-up — see
 ## Stack
 
 - **Backend:** FastAPI, Celery + Redis for background ingestion, ChromaDB
-  (vector store) + Firestore (document/chunk/chapter metadata), local
-  `sentence-transformers` embeddings, Groq + Gemini LLMs via LangChain.
+  (vector store) + Firestore (document/chunk/chapter metadata), Jina AI
+  hosted embeddings + reranking, Groq + Gemini LLMs via LangChain.
 - **Frontend:** React 19 + Vite, React Router.
 
 ## Architecture
@@ -28,8 +28,9 @@ The app is intentionally open with no accounts or sign-up — see
    detects chapter boundaries.
 3. **Chunking** (`app/services/chunker.py`) — overlapping word-count chunks
    per chapter.
-4. **Embedding** (`app/services/embedder.py`) — local `sentence-transformers`
-   model.
+4. **Embedding** (`app/services/embedder.py`) — Jina AI's hosted embeddings
+   API (`jina-embeddings-v3`), not a local model — keeps the backend's memory
+   footprint small enough for cheap hosting tiers.
 5. **Storage** — chunks go to both Firestore and ChromaDB, in per-document
    collections. PDF uploads only ever reach a temporary Chroma collection —
    no Firestore document is created for them.
@@ -37,7 +38,8 @@ The app is intentionally open with no accounts or sign-up — see
    capped at 100 chapters for free-tier LLM rate limits.
 7. **Query** (`app/services/query_service.py`) — classifies each question as
    broad (thematic — two-stage chapter-summary → chunk retrieval) or narrow
-   (direct chunk vector search), expands it via LLM multi-query, and requires
+   (direct chunk vector search), expands it via LLM multi-query, reranks
+   candidates via Jina AI (`app/services/reranker.py`), and requires
    citations in the answer.
 
 Ingestion is resumable: a `phase` field on the Firestore doc lets a retried
@@ -51,6 +53,7 @@ Celery task pick up where it left off instead of restarting from scratch.
 - Redis running locally (`redis://localhost:6379` by default)
 - A Firebase/GCP service-account key for Firestore
 - A [Chroma Cloud](https://www.trychroma.com/pricing) account + API key (vector storage — see [Design notes](#design-notes) for why this isn't local disk)
+- A [Jina AI](https://jina.ai/api-dashboard/key-manager) API key (free tier, no credit card) for embeddings + reranking
 
 ### Environment variables
 
@@ -61,6 +64,7 @@ GROQ_API_KEY=...
 GEMINI_API_KEY=...
 FIREBASE_CREDENTIALS_PATH=./firebase_credentials.json
 CHROMA_API_KEY=...
+JINA_API_KEY=...
 ```
 
 Other tunables (chunk size/overlap, embedding model, session TTL, etc.) live
@@ -68,9 +72,9 @@ in `app/core/config.py` with sane defaults.
 
 ### Run it
 
-The app's own code has no OS-specific logic — FastAPI, PyMuPDF,
-sentence-transformers, ChromaDB, and the frontend all run natively on either
-platform. The only real friction is **Celery and Redis**, neither of which
+The app's own code has no OS-specific logic — FastAPI, PyMuPDF, ChromaDB, and
+the frontend all run natively on either platform. The only real friction is
+**Celery and Redis**, neither of which
 officially supports native Windows: Celery's default worker pool relies on
 `os.fork()` (Unix-only), and Redis ships no official Windows build. Pick
 whichever path below matches your setup.
@@ -161,6 +165,11 @@ previous runs — run `document_deletion.py` for Firestore, and delete any
 stale collections from the Chroma Cloud dashboard — so stale vectors don't
 make results ambiguous.
 
+A long novel can legitimately take several extra minutes to ingest on Jina's
+free-tier embedding budget (100K tokens/minute) — a slow test run isn't
+necessarily a regression; check the backend logs for repeated 429s from
+`api.jina.ai` before assuming something's broken.
+
 ```bash
 ./venv/bin/pytest -m smoke      # Linux/WSL2
 venv\Scripts\pytest.exe -m smoke  # Windows
@@ -175,8 +184,11 @@ venv\Scripts\pytest.exe -m smoke  # Windows
 - **Backend → Render:** provision a managed Redis instance for
   `CELERY_BROKER_URL`/`REDIS_URL`; upload the Firebase credentials JSON via
   Render's Secret Files and point `FIREBASE_CREDENTIALS_PATH` at the mounted
-  path; set `CHROMA_API_KEY` as a plain env var; start command needs
-  `--host 0.0.0.0 --port $PORT` (Render assigns the port dynamically).
+  path; set `CHROMA_API_KEY` and `JINA_API_KEY` as plain env vars; start
+  command needs `--host 0.0.0.0 --port $PORT` (Render assigns the port
+  dynamically). With no local embedding/reranking model to load, the backend
+  idles around 400-500MB — fits Render's $7/mo Starter plan (512MB), not just
+  the $25/mo Standard tier.
 - **No Persistent Disk needed.** Vector storage lives in Chroma Cloud, not
   local disk, so Render's free-tier ephemeral filesystem (wiped on every
   redeploy or idle spin-down) is a non-issue for it — see
@@ -205,4 +217,14 @@ venv\Scripts\pytest.exe -m smoke  # Windows
   zero candidates) still exists as a defensive fallback — it re-embeds
   chunk/chapter text already stored in Firestore if Chroma's copy is ever
   found missing for any reason — but it's no longer the normal-case path the
-  way it was when storage reset on every container restart.
+  way it was when storage reset on every container restart. A single
+  `upsert()` call is capped at 300 records on Chroma's free tier, so bulk
+  writes are batched (250/call) rather than sent in one shot.
+- **Hosted embeddings/reranking (Jina AI), not a local model.** Switched away
+  from local `sentence-transformers`/`torch` specifically to cut memory —
+  the local model's footprint didn't fit Render's cheaper tiers even after
+  other optimizations. The trade-off is Jina's free-tier rate limit (100K
+  tokens/minute, shared across embeddings + reranking): ingesting a long
+  novel can take several minutes longer than it used to, since a large
+  book's total chunk text can exceed that budget and has to wait out the
+  per-minute window. This is expected backpressure, not a bug.

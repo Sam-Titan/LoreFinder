@@ -1,23 +1,25 @@
-import threading
+from app.core.config import settings
+from app.services.jina_client import post_with_retry
 
-from sentence_transformers import CrossEncoder
-
-_model = None
-_model_lock = threading.Lock()
-
-def get_reranker() -> CrossEncoder:
-    global _model
-    if _model is None:
-        with _model_lock:
-            if _model is None:
-                _model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-    return _model
+_JINA_RERANK_URL = "https://api.jina.ai/v1/rerank"
 
 def rerank(query: str, candidates: list[dict], top_k: int) -> list[dict]:
     if not candidates:
         return candidates
-    model = get_reranker()
-    pairs = [[query, c["document"]] for c in candidates]
-    scores = model.predict(pairs)
-    ranked = sorted(zip(candidates, scores, strict=True), key=lambda pair: pair[1], reverse=True)
-    return [c for c, _ in ranked[:top_k]]
+
+    response = post_with_retry(
+        _JINA_RERANK_URL,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {settings.JINA_API_KEY}",
+        },
+        json_body={
+            "model": settings.RERANKER_MODEL_NAME,
+            "query": query,
+            "top_n": min(top_k, len(candidates)),
+            "documents": [c["document"] for c in candidates],
+        },
+        timeout=30,
+    )
+    # Jina already returns results sorted by relevance_score, descending.
+    return [candidates[r["index"]] for r in response.json()["results"]]

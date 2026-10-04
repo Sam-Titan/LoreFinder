@@ -69,6 +69,26 @@ def _detect_explicit_chapter(query: str) -> int | None:
 def _is_last_chapter_reference(query: str) -> bool:
     return bool(_LAST_CHAPTER_RE.search(query.lower()))
 
+def _is_positional_first_reference(query: str) -> bool:
+    return bool(_FIRST_CHAPTER_RE.search(query.lower()))
+
+_TITLED_CHAPTER_RE = re.compile(r"^chapter\s+0*(\d+)\b")
+
+def _resolve_chapter_number(chapters: list[dict], requested: int) -> int:
+    # chapter_number is just a sequential index over every detected section —
+    # including front matter like "Letter 1"-"Letter 4" before "Chapter 1" in
+    # Frankenstein — so it doesn't line up with the number printed in the
+    # chapter's own title once a novel has any such front matter. "Chapter 5"
+    # means the section actually titled "Chapter 5", not the 5th section
+    # overall, so resolve against chapter_title instead of assuming the two
+    # match. Falls back to the raw number when no title match exists (e.g. a
+    # novel with no front matter, where they're the same number anyway).
+    for ch in chapters:
+        title_match = _TITLED_CHAPTER_RE.match((ch.get("chapter_title") or "").strip().lower())
+        if title_match and int(title_match.group(1)) == requested:
+            return ch["chapter_number"]
+    return requested
+
 def classify_query_intent(query: str) -> Category:
     q_lower = query.lower()
 
@@ -126,7 +146,9 @@ def embed_query(query: str) -> list[list[float]]:
     embedder = get_embedder()
     # Return one vector per phrasing — searched and merged separately downstream
     # instead of averaged, so no single phrasing's signal gets diluted.
-    return embedder.embed(queries)
+    # task="retrieval.query": these are search inputs, not indexed content —
+    # must differ from the "retrieval.passage" task used at ingest time.
+    return embedder.embed(queries, task="retrieval.query")
 
 def _assemble_context(results: list[dict]) -> str:
     parts = []
@@ -215,9 +237,13 @@ async def run_query_pipeline(doc_id: str, query: str) -> dict:
                 if doc.get("progress") == "chunks ready, chapter summarization in progress":
                     raise ValueError("Chapter summaries are still being processed. Please try a narrow query or wait until fully indexed.")
 
+                chapters = await run(firestore.get_chapters, doc_id)
+
                 chapter_ref = _detect_explicit_chapter(query)
                 if chapter_ref is None and _is_last_chapter_reference(query):
                     chapter_ref = doc.get("chapter_count")
+                elif chapter_ref is not None and not _is_positional_first_reference(query):
+                    chapter_ref = _resolve_chapter_number(chapters, chapter_ref)
 
                 if chapter_ref:
                     # A specific chapter was named directly — chapter-summary
@@ -230,7 +256,6 @@ async def run_query_pipeline(doc_id: str, query: str) -> dict:
                     )
                     return _union_by_id(vector_candidates, lexical_candidates)
 
-                chapters = await run(firestore.get_chapters, doc_id)
                 all_chapter_numbers = [ch["chapter_number"] for ch in chapters]
                 vector_candidates, lexical_candidates = await asyncio.gather(
                     run(
@@ -245,6 +270,9 @@ async def run_query_pipeline(doc_id: str, query: str) -> dict:
                 if chapter_ref is None and _is_last_chapter_reference(query):
                     doc = await run(firestore.get_document, doc_id)
                     chapter_ref = doc.get("chapter_count") if doc else None
+                elif chapter_ref is not None and not _is_positional_first_reference(query):
+                    chapters = await run(firestore.get_chapters, doc_id)
+                    chapter_ref = _resolve_chapter_number(chapters, chapter_ref)
 
                 vector_candidates, lexical_candidates = await asyncio.gather(
                     run(retriever.retrieve_narrow, doc_id, query_vectors, top_k=_CANDIDATE_K,

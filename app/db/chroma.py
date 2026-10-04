@@ -45,21 +45,30 @@ def get_chapter_collection(doc_id: str):
 def get_temp_collection(session_id: str):
     return get_client().get_or_create_collection(f"temp_{session_id}")
 
+# Chroma Cloud's free tier caps a single upsert at 300 records — a long
+# novel (e.g. The Count of Monte Cristo, 700+ chunks) exceeds that in one
+# call, confirmed empirically via a live "Quota exceeded... Number of
+# records" error. 250 leaves headroom below the real ceiling.
+_UPSERT_BATCH_SIZE = 250
+
 def write_chunk_embeddings(doc_id: str, chunks: list[dict], vectors: list[list[float]]):
     collection = get_chunk_collection(doc_id)
     # upsert (not add) — chunk_id is deterministic, so a retried ingestion
     # overwrites in place instead of erroring or duplicating.
-    collection.upsert(
-        ids=[c["chunk_id"] for c in chunks],
-        embeddings=vectors,
-        documents=[c["chunk_text"] for c in chunks],
-        metadatas=[{
-            "doc_id": doc_id,
-            "chapter_number": c["chapter_number"],
-            "chapter_title": c.get("chapter_title") or "",  # add this
-            "chunk_index": c["chunk_index"]
-        } for c in chunks]
-    )
+    for i in range(0, len(chunks), _UPSERT_BATCH_SIZE):
+        batch = chunks[i:i + _UPSERT_BATCH_SIZE]
+        batch_vectors = vectors[i:i + _UPSERT_BATCH_SIZE]
+        collection.upsert(
+            ids=[c["chunk_id"] for c in batch],
+            embeddings=batch_vectors,
+            documents=[c["chunk_text"] for c in batch],
+            metadatas=[{
+                "doc_id": doc_id,
+                "chapter_number": c["chapter_number"],
+                "chapter_title": c.get("chapter_title") or "",  # add this
+                "chunk_index": c["chunk_index"]
+            } for c in batch]
+        )
 
 def write_chapter_embeddings(doc_id: str, chapters: list[dict], vectors: list[list[float]]):
     collection = get_chapter_collection(doc_id)

@@ -5,6 +5,11 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str
     GEMINI_API_KEY: str
 
+    # Jina AI — hosted embeddings + reranking (replaces local
+    # sentence-transformers/torch, which needed ~1GB+ RAM the app's Render
+    # tier doesn't have headroom for).
+    JINA_API_KEY: str
+
     # Firebase
     FIREBASE_CREDENTIALS_PATH: str
 
@@ -15,8 +20,12 @@ class Settings(BaseSettings):
     CHROMA_TENANT: str
     CHROMA_DATABASE: str
 
-    # Embedding
-    EMBEDDING_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
+    # Embedding / reranking (Jina AI hosted models)
+    EMBEDDING_MODEL_NAME: str = "jina-embeddings-v3"
+    # 768 of the model's max 1024 dims (Matryoshka-truncatable) — near-identical
+    # retrieval quality per Jina's own benchmarks, smaller Chroma storage/bandwidth.
+    EMBEDDING_DIMENSIONS: int = 768
+    RERANKER_MODEL_NAME: str = "jina-reranker-v3.5"
 
     # Groq and Gemini Model Names
     GROQ_MODEL_NAME: str = "openai/gpt-oss-20b"

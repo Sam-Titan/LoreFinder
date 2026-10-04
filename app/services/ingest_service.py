@@ -142,27 +142,36 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
                         "status": "pending"
                     })
 
-                # Per-chapter checkpoint — saves immediately after each summary
-                async def save_chapter(ch: dict):
-                    chunk_docs = firestore.get_chunks_by_chapter(doc_id, ch["chapter_number"])
-                    chapter_record = {
-                        # Deterministic id — a retry overwrites the same chapter in
-                        # place (via upsert) instead of creating an orphaned duplicate.
-                        "chapter_id": f"ch_{doc_id}_{ch['chapter_number']}",
-                        "doc_id": doc_id,
-                        "chapter_number": ch["chapter_number"],
-                        "chapter_title": ch["chapter_title"],
-                        "summary": ch["summary"],
-                        "chunk_indexes": [c["chunk_id"] for c in chunk_docs],
-                        "status": "complete",
-                        "created_at": datetime.now(timezone.utc).isoformat()
-                    }
-                    firestore.write_chapter(doc_id, chapter_record)
-                    vector = embedder.embed([ch["summary"]])[0]
-                    chroma.write_chapter_embeddings(doc_id, [chapter_record], [vector])
+                # Per-batch checkpoint — saves immediately after each batch of
+                # summaries (same batch Gemini already summarized concurrently).
+                # One embed call + one Chroma upsert for the whole batch instead
+                # of one of each per chapter — with a hosted embedder, each of
+                # those is a network round-trip, so for a 100-chapter novel this
+                # is the difference between ~20 round-trips and ~100.
+                async def save_batch(batch: list[dict]):
+                    chapter_records = []
+                    for ch in batch:
+                        chunk_docs = firestore.get_chunks_by_chapter(doc_id, ch["chapter_number"])
+                        chapter_record = {
+                            # Deterministic id — a retry overwrites the same chapter in
+                            # place (via upsert) instead of creating an orphaned duplicate.
+                            "chapter_id": f"ch_{doc_id}_{ch['chapter_number']}",
+                            "doc_id": doc_id,
+                            "chapter_number": ch["chapter_number"],
+                            "chapter_title": ch["chapter_title"],
+                            "summary": ch["summary"],
+                            "chunk_indexes": [c["chunk_id"] for c in chunk_docs],
+                            "status": "complete",
+                            "created_at": datetime.now(timezone.utc).isoformat()
+                        }
+                        firestore.write_chapter(doc_id, chapter_record)
+                        chapter_records.append(chapter_record)
+
+                    vectors = embedder.embed([r["summary"] for r in chapter_records])
+                    chroma.write_chapter_embeddings(doc_id, chapter_records, vectors)
 
                 await summarizer.summarize_chapters(pending_chapters,
-                                                   on_complete=save_chapter)
+                                                   on_batch_complete=save_batch)
                 phase = "summarization_complete"
 
         if phase in ("summarization_complete", "chunks_complete"):
