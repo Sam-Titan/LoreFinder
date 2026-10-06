@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from app.db import firestore, chroma
-from app.services import acquisition, parser, chunker, summarizer, bm25_index
+from app.services import chunker, bm25_index
 from app.services.embedder import get_embedder
 
 MAX_SUMMARY_CHAPTERS = 100
@@ -42,6 +42,11 @@ def rebuild_chroma_if_missing(doc_id: str) -> bool:
     return True
 
 async def run_novel_ingestion(doc_id: str, title: str, author: str):
+    # Imported here, not at module top: the API process imports this module
+    # too (for check_duplicate/rebuild) and must not load the agent, PDF, and
+    # Gemini stacks it never uses.
+    from app.services import acquisition, parser, summarizer
+
     doc = firestore.get_document(doc_id)
     phase = doc.get("phase", "start")
 
@@ -194,6 +199,7 @@ async def run_novel_ingestion(doc_id: str, title: str, author: str):
         raise e
     
 async def run_pdf_ingestion(session_id: str, file_bytes: bytes):
+    from app.services import parser
     try:
         # 1. Parse PDF
         clean = parser.parse_pdf(file_bytes)
